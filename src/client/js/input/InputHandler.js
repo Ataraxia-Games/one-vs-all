@@ -6,10 +6,10 @@ export class InputHandler {
             s: false,
             d: false
         };
-        this.mouse = {
-            x: undefined,
-            y: undefined
-        };
+        // Store raw screen coordinates
+        this.rawMouseX = undefined;
+        this.rawMouseY = undefined;
+        this.wheelDelta = 0; // Store wheel delta
 
         // Keyboard event listeners
         window.addEventListener('keydown', (e) => this.handleKeyDown(e));
@@ -17,6 +17,8 @@ export class InputHandler {
         
         // Mouse event listeners
         window.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+        // Wheel event listener - explicitly set passive to false
+        window.addEventListener('wheel', (e) => this.handleWheel(e), { passive: false });
     }
 
     handleKeyDown(e) {
@@ -62,19 +64,26 @@ export class InputHandler {
     }
 
     handleMouseMove(e) {
-        // Store raw screen coordinates
         this.rawMouseX = e.clientX;
         this.rawMouseY = e.clientY;
     }
 
-    getInput(cameraX = 0, cameraY = 0) {
-        // Calculate world mouse coordinates
-        const worldMouseX = this.rawMouseX - cameraX;
-        const worldMouseY = this.rawMouseY - cameraY;
+    handleWheel(e) {
+        // Accumulate wheel delta (positive for scroll down/zoom out, negative for scroll up/zoom in)
+        this.wheelDelta += e.deltaY;
+        // Prevent page scrolling
+        e.preventDefault(); 
+    }
+
+    getInput() {
+        const currentWheelDelta = this.wheelDelta;
+        this.wheelDelta = 0; // Reset delta after reading
 
         return {
             keys: { ...this.keys },
-            mouse: { x: worldMouseX, y: worldMouseY }
+            rawMouseX: this.rawMouseX,
+            rawMouseY: this.rawMouseY,
+            wheelDelta: currentWheelDelta
         };
     }
 } 

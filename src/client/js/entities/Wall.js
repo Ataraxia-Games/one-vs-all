@@ -1,10 +1,11 @@
 export class Wall {
-    constructor(x, y, length, angle) {
+    constructor(x, y, length, angle, color = '#333') {
         this.x = x;
         this.y = y;
         this.length = length;
         this.angle = angle;
         this.width = 20; // Толщина стены
+        this.color = color; // Добавляем цвет
     }
 
     update(deltaTime, input) {
@@ -13,12 +14,13 @@ export class Wall {
 
     render(ctx) {
         ctx.save();
-        ctx.translate(this.x, this.y);
-        ctx.rotate(this.angle);
+        ctx.translate(this.x, this.y); // Переходим в центр стены
+        ctx.rotate(this.angle);      // Поворачиваем систему координат
 
-        // Рисуем стену
-        ctx.fillStyle = '#333';
-        ctx.fillRect(-this.width/2, -this.length/2, this.width, this.length);
+        // Рисуем стену, центрированную локально (вдоль повернутой оси X)
+        ctx.fillStyle = this.color; 
+        // x: -длина/2, y: -ширина(толщина)/2, ширина: длина, высота: ширина(толщина)
+        ctx.fillRect(-this.length / 2, -this.width / 2, this.length, this.width);
 
         ctx.restore();
     }

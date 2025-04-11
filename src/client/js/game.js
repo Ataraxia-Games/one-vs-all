@@ -13,9 +13,18 @@ class Game {
         this.fogCanvas = document.createElement('canvas');
         this.fogCtx = this.fogCanvas.getContext('2d');
 
+        this.worldWidth = 2000;
+        this.worldHeight = 2000;
+
         this.gameEngine = new GameEngine(this.ctx);
         this.inputHandler = new InputHandler();
         
+        // Zoom properties
+        this.zoom = 1.0;
+        this.minZoom = 0.3;
+        this.maxZoom = 2.5;
+        this.zoomSpeed = 0.001;
+
         // Set canvas size (will also resize fogCanvas)
         this.resizeCanvas();
         window.addEventListener('resize', () => this.resizeCanvas());
@@ -29,18 +38,17 @@ class Game {
     }
 
     initGame() {
-        // Create player
-        this.player = new Player(this.canvas.width / 2, this.canvas.height / 2);
+        // Create player in the center of the world
+        this.player = new Player(this.worldWidth / 2, this.worldHeight / 2);
         this.gameEngine.addEntity(this.player);
 
-        // Generate map
-        const mapGenerator = new MapGenerator(this.canvas.width, this.canvas.height);
-        const walls = mapGenerator.getWalls();
+        // Generate boundary walls for the world
+        const mapGenerator = new MapGenerator(this.worldWidth, this.worldHeight);
+        const boundaryWalls = mapGenerator.getWalls(); // Now returns Wall instances
 
-        // Add walls to game engine
-        walls.forEach(wallData => {
-            const wall = new Wall(wallData.x, wallData.y, wallData.length, wallData.angle);
-            this.gameEngine.addEntity(wall);
+        // Add boundary walls to game engine
+        boundaryWalls.forEach(wall => {
+            this.gameEngine.addEntity(wall); // Add Wall instance directly
         });
     }
 
@@ -67,70 +75,96 @@ class Game {
     }
 
     update(deltaTime) {
-        // Calculate camera offset for input handling
-        const cameraX = this.canvas.width / 2 - this.player.x;
-        const cameraY = this.canvas.height / 2 - this.player.y;
+        const rawInput = this.inputHandler.getInput();
 
-        const input = this.inputHandler.getInput(cameraX, cameraY);
-        this.gameEngine.update(deltaTime, input);
+        // --- Update Zoom ---
+        if (rawInput.wheelDelta !== 0) {
+            const zoomAmount = rawInput.wheelDelta * this.zoomSpeed;
+            this.zoom -= zoomAmount;
+            // Clamp zoom level
+            this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom));
+        }
+
+        // --- Calculate World Mouse Coordinates (considering camera and zoom) ---
+        // Camera offset calculation (before zoom) - needed for world coords
+        const cameraX = this.canvas.width / 2 - this.player.x * this.zoom;
+        const cameraY = this.canvas.height / 2 - this.player.y * this.zoom;
+        
+        const worldMouseX = (rawInput.rawMouseX - cameraX) / this.zoom;
+        const worldMouseY = (rawInput.rawMouseY - cameraY) / this.zoom;
+        
+        // Prepare input object for game engine
+        const inputForEngine = {
+            keys: rawInput.keys,
+            mouse: { x: worldMouseX, y: worldMouseY } 
+        };
+
+        this.gameEngine.update(deltaTime, inputForEngine);
     }
 
     render() {
         // Clear main canvas with gray background
-        this.ctx.fillStyle = '#1a1a1a';
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.fillStyle = '#1a1a1a'; // Restore background color
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height); // Restore background fill
 
-        // --- Render world with camera offset onto main canvas ---
+        // --- Render world with camera offset AND zoom (Re-enabled) ---
         this.ctx.save(); 
-        const cameraX = this.canvas.width / 2 - this.player.x;
-        const cameraY = this.canvas.height / 2 - this.player.y;
+        // Center camera on player
+        const cameraX = this.canvas.width / 2 - this.player.x * this.zoom;
+        const cameraY = this.canvas.height / 2 - this.player.y * this.zoom;
         this.ctx.translate(cameraX, cameraY);
-        this.gameEngine.render(); // Render all entities onto main canvas
+        // Apply zoom
+        this.ctx.scale(this.zoom, this.zoom);
+        
+        // Render all entities onto main canvas (now scaled and translated)
+        this.gameEngine.render(); 
         this.ctx.restore(); 
         // --- End world rendering ---
-
-        // --- Render Fog of War using offscreen canvas ---
         
-        // 1. Clear the offscreen canvas and fill with solid black fog
+
+        // --- Render Fog of War using offscreen canvas --- 
         this.fogCtx.clearRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
         this.fogCtx.fillStyle = 'rgba(0, 0, 0, 1)';
         this.fogCtx.fillRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
 
-        // 2. Create the field of view (FOV) shape on the offscreen canvas
         const playerScreenX = this.fogCanvas.width / 2;
         const playerScreenY = this.fogCanvas.height / 2;
+        
+        // Define FOV properties in world units
         const fovAngle = Math.PI / 2; // 90 degrees
-        // Shorter view radius
-        const viewRadius = Math.min(this.fogCanvas.width, this.fogCanvas.height) * 0.6; 
+        const worldViewRadius = 500; // Fixed distance in world pixels
 
+        // Calculate screen radius based on world radius and zoom
+        let screenViewRadius = worldViewRadius * this.zoom;
+        screenViewRadius = Math.max(1, screenViewRadius); // Ensure radius is positive
+
+        // Draw the arc using screen radius
         this.fogCtx.beginPath();
         this.fogCtx.moveTo(playerScreenX, playerScreenY);
         this.fogCtx.arc(
-            playerScreenX, 
-            playerScreenY, 
-            viewRadius, 
+            playerScreenX, playerScreenY, 
+            screenViewRadius, // Use screen radius for drawing
             this.player.angle - fovAngle / 2, 
             this.player.angle + fovAngle / 2
         );
         this.fogCtx.closePath();
-
-        // 3. Create radial gradient for soft edges
+        
+        // Create radial gradient using screen radius
         const gradient = this.fogCtx.createRadialGradient(
-            playerScreenX, playerScreenY, viewRadius * 0.5, // Inner circle (fully clear)
-            playerScreenX, playerScreenY, viewRadius      // Outer circle (fully fogged)
+            playerScreenX, playerScreenY, screenViewRadius * 0.5, // Inner circle (scaled by zoom)
+            playerScreenX, playerScreenY, screenViewRadius      // Outer circle (scaled by zoom)
         );
-        gradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); // Opaque alpha at center (clears fog)
-        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); // Transparent alpha at edge (keeps fog)
+        gradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); // Opaque alpha at center
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); // Transparent alpha at edge
 
-        // 4. Use 'destination-out' and fill with the gradient to cut out the FOV with soft edges
+        // Cutout using destination-out and the gradient
         this.fogCtx.globalCompositeOperation = 'destination-out';
         this.fogCtx.fillStyle = gradient;
         this.fogCtx.fill();
-        this.fogCtx.globalCompositeOperation = 'source-over'; // Reset composite operation
+        this.fogCtx.globalCompositeOperation = 'source-over'; 
 
-        // 5. Draw the result (fog with gradient hole) from the offscreen canvas onto the main canvas
+        // Draw the prepared fog canvas over the world
         this.ctx.drawImage(this.fogCanvas, 0, 0);
-        
         // --- End Fog of War ---
     }
 }
