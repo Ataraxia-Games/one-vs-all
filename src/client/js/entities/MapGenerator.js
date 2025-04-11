@@ -6,6 +6,7 @@ export class MapGenerator {
         this.worldHeight = worldHeight;
         this.walls = [];
         this.generateBoundaryWalls();
+        this.generateInnerWalls();
     }
 
     generateBoundaryWalls() {
@@ -42,6 +43,25 @@ export class MapGenerator {
 
             // Создаем черную стену
             this.walls.push(new Wall(wallX, wallY, length, angle, '#000000')); 
+        }
+    }
+
+    generateInnerWalls() {
+        const numInnerWalls = 50; // Количество внутренних стен
+        const minLength = 80;
+        const maxLength = 300;
+        const padding = 100; // Отступ от краев мира
+
+        for (let i = 0; i < numInnerWalls; i++) {
+            // Генерируем позицию внутри мира с отступами
+            const x = padding + Math.random() * (this.worldWidth - 2 * padding);
+            const y = padding + Math.random() * (this.worldHeight - 2 * padding);
+            
+            const length = minLength + Math.random() * (maxLength - minLength);
+            const angle = Math.random() * Math.PI * 2; 
+
+            // Создаем черную внутреннюю стену
+            this.walls.push(new Wall(x, y, length, angle, '#000000')); 
         }
     }
 
