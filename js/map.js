@@ -84,11 +84,22 @@ export class Map {
         for (const wall of this.boundaries) {
             const distance = this.distanceToLine(x, y, wall);
             if (distance < radius + 10) {
-                const normal = this.getWallNormal(wall);
-                return {
-                    collides: true,
-                    normal: normal
-                };
+                // Проверяем, находится ли проекция точки на отрезке
+                const A = x - wall.x;
+                const B = y - wall.y;
+                const C = wall.endX - wall.x;
+                const D = wall.endY - wall.y;
+                const dot = A * C + B * D;
+                const len_sq = C * C + D * D;
+                const param = dot / len_sq;
+
+                if (param >= 0 && param <= 1) {
+                    const normal = this.getWallNormal(wall);
+                    return {
+                        collides: true,
+                        normal: normal
+                    };
+                }
             }
         }
 
@@ -96,11 +107,22 @@ export class Map {
         for (const wall of this.walls) {
             const distance = this.distanceToLine(x, y, wall);
             if (distance < radius + 10) {
-                const normal = this.getWallNormal(wall);
-                return {
-                    collides: true,
-                    normal: normal
-                };
+                // Проверяем, находится ли проекция точки на отрезке
+                const A = x - wall.x;
+                const B = y - wall.y;
+                const C = wall.endX - wall.x;
+                const D = wall.endY - wall.y;
+                const dot = A * C + B * D;
+                const len_sq = C * C + D * D;
+                const param = dot / len_sq;
+
+                if (param >= 0 && param <= 1) {
+                    const normal = this.getWallNormal(wall);
+                    return {
+                        collides: true,
+                        normal: normal
+                    };
+                }
             }
         }
 
@@ -151,7 +173,7 @@ export class Map {
     render(ctx) {
         ctx.save();
         ctx.strokeStyle = '#000';
-        ctx.lineWidth = 20;
+        ctx.lineWidth = 20; // Толщина стен
 
         // Render boundaries
         this.boundaries.forEach(wall => {

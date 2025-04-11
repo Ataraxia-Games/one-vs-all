@@ -163,6 +163,15 @@ export class Game {
 
             // Restore the context state
             this.ctx.restore();
+
+            // Draw crosshair at mouse position
+            this.ctx.save();
+            this.ctx.strokeStyle = '#fff';
+            this.ctx.lineWidth = 1;
+            this.ctx.beginPath();
+            this.ctx.arc(this.mouse.rawX, this.mouse.rawY, 10, 0, Math.PI * 2);
+            this.ctx.stroke();
+            this.ctx.restore();
         }
         
         // Render game time
@@ -219,17 +228,38 @@ export class Game {
     }
     
     addTestPlayers() {
+        // Helper function to find a valid spawn position
+        const findValidSpawn = () => {
+            let x, y;
+            let attempts = 0;
+            const maxAttempts = 100;
+            
+            do {
+                // Generate random position within boundaries
+                x = (Math.random() - 0.5) * 4000;
+                y = (Math.random() - 0.5) * 4000;
+                attempts++;
+            } while ((!this.map.isPointInsideBoundaries(x, y) || 
+                     this.map.checkCollision(x, y, 15).collides) && 
+                     attempts < maxAttempts);
+
+            return { x, y };
+        };
+
         // Add a player
-        const player = new Player(0, 0, '#00f');
+        const playerPos = findValidSpawn();
+        const player = new Player(playerPos.x, playerPos.y, '#00f');
         this.players.push(player);
         this.activePlayer = player;
 
         // Add a hunter
-        const hunter = new Hunter(100, 100, '#f00');
+        const hunterPos = findValidSpawn();
+        const hunter = new Hunter(hunterPos.x, hunterPos.y, '#f00');
         this.players.push(hunter);
 
         // Add a predator
-        const predator = new Predator(-100, -100, '#0f0');
+        const predatorPos = findValidSpawn();
+        const predator = new Predator(predatorPos.x, predatorPos.y, '#0f0');
         this.players.push(predator);
     }
 

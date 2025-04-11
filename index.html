@@ -18,6 +18,7 @@
             height: 100vh;
             overflow: hidden;
             background-color: #000;
+            cursor: none;
         }
         
         canvas {
@@ -31,5 +32,9 @@
 <body>
     <canvas id="gameCanvas"></canvas>
     <script type="module" src="./js/game.js"></script>
+    <script>
+        // Prevent context menu on right click
+        document.addEventListener('contextmenu', event => event.preventDefault());
+    </script>
 </body>
 </html> 
