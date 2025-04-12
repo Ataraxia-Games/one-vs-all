@@ -4,69 +4,70 @@ export class Player {
     constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.width = 30;
-        this.height = 30;
-        this.radius = 15;
-        this.speed = 5;
+        this.radius = 15; 
+        this.speed = 200; // Увеличена скорость (пикселей В СЕКУНДУ)
         this.angle = 0;
+        this.width = 30; // Keep for potential future use or rendering reference
+        this.height = 30;
+        this.ammo = 10; // Начальное количество патронов
     }
 
     update(deltaTime, input, walls) {
-        // Calculate potential movement
+        // Convert deltaTime from ms to seconds for consistent speed calculation
+        const dt = deltaTime / 1000; 
+
+        // Calculate potential movement scaled by time
         let deltaX = 0;
         let deltaY = 0;
-        // Note: Using fixed speed for now, not scaling by deltaTime for simplicity
-        if (input.keys.w) deltaY -= this.speed; 
-        if (input.keys.s) deltaY += this.speed;
-        if (input.keys.a) deltaX -= this.speed;
-        if (input.keys.d) deltaX += this.speed;
+        if (input.keys.w) deltaY -= this.speed * dt;
+        if (input.keys.s) deltaY += this.speed * dt;
+        if (input.keys.a) deltaX -= this.speed * dt;
+        if (input.keys.d) deltaX += this.speed * dt;
 
-        // --- Collision Detection & Resolution with Sliding ---
-        let finalX = this.x;
-        let finalY = this.y;
-
-        if (walls) {
-            // Check X-axis collision
-            let potentialX = this.x + deltaX;
-            let collisionX = false;
-            if (deltaX !== 0) {
-                for (const wall of walls) {
-                    if (checkCircleWallCollision({ x: potentialX, y: this.y, radius: this.radius }, wall)) {
-                        collisionX = true;
-                        // TODO: Optional - adjust potentialX to stop exactly at the wall
-                        break;
-                    }
-                }
-            }
-            if (!collisionX) {
-                finalX = potentialX;
-            }
-
-            // Check Y-axis collision (using potentially updated X: finalX)
-            let potentialY = this.y + deltaY;
-            let collisionY = false;
-            if (deltaY !== 0) {
-                for (const wall of walls) {
-                    // Check Y movement against the position *after* potential X movement
-                    if (checkCircleWallCollision({ x: finalX, y: potentialY, radius: this.radius }, wall)) {
-                        collisionY = true;
-                        // TODO: Optional - adjust potentialY to stop exactly at the wall
-                        break;
-                    }
-                }
-            }
-            if (!collisionY) {
-                finalY = potentialY;
-            }
-        } else {
-             // No walls provided, move freely
-            finalX = this.x + deltaX;
-            finalY = this.y + deltaY;
+        // Normalize diagonal movement (optional but good practice)
+        if (deltaX !== 0 && deltaY !== 0) {
+            const factor = 1 / Math.sqrt(2);
+            deltaX *= factor;
+            deltaY *= factor;
         }
 
-        // Apply final position
-        this.x = finalX;
-        this.y = finalY;
+        // --- Collision Detection & Resolution (Move then Pushback) ---
+        let tempX = this.x + deltaX;
+        let tempY = this.y + deltaY;
+
+        if (walls) {
+            // Check for collisions at the temporary position
+            // Perform multiple iterations to handle pushing from multiple walls if needed
+            const maxPushIterations = 3; 
+            for (let i = 0; i < maxPushIterations; i++) {
+                let collisionOccurred = false;
+                for (const wall of walls) {
+                    const collisionResult = checkCircleWallCollision(
+                        { x: tempX, y: tempY, radius: this.radius }, 
+                        wall
+                    );
+
+                    if (collisionResult.collided) {
+                        collisionOccurred = true;
+                        // Apply pushback based on overlap and push direction
+                        // Add a small epsilon to avoid getting stuck exactly on the edge
+                        const pushAmount = collisionResult.overlap + 0.01;
+                        tempX += collisionResult.pushX * pushAmount;
+                        tempY += collisionResult.pushY * pushAmount;
+                        // Note: This handles one wall per iteration. 
+                        // Multiple iterations help resolve complex corner cases.
+                    }
+                }
+                if (!collisionOccurred) {
+                    // If no collision in this iteration, position is resolved
+                    break; 
+                }
+            }
+        }
+
+        // Set final position after potential pushbacks
+        this.x = tempX;
+        this.y = tempY;
         // --- End Collision ---
 
         // Handle rotation (aiming) - relative to current position
@@ -82,19 +83,31 @@ export class Player {
         ctx.translate(this.x, this.y);
         ctx.rotate(this.angle);
 
-        // Draw player body as a circle
-        ctx.fillStyle = '#fff';
+        // Draw player body as a black circle
+        ctx.fillStyle = '#000'; // Черный цвет
         ctx.beginPath();
-        ctx.arc(0, 0, this.radius, 0, Math.PI * 2); // Draw circle using collision radius
+        ctx.arc(0, 0, this.radius, 0, Math.PI * 2); 
         ctx.fill();
 
-        // Draw aiming direction line from the center
+        // --- Remove aiming line --- 
+        /*
         ctx.beginPath();
         ctx.moveTo(0, 0);
-        ctx.lineTo(this.radius, 0); // Make line length match radius
+        ctx.lineTo(this.radius, 0); 
         ctx.strokeStyle = '#f00';
-        ctx.lineWidth = 2; // Make line slightly thicker
+        ctx.lineWidth = 2; 
         ctx.stroke();
+        */
+
+        // --- Draw Ammo Count --- 
+        // Rotate context back to draw text upright relative to screen
+        ctx.rotate(-this.angle); 
+        
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.71)'; // Полупрозрачный белый цвет текста
+        ctx.font = 'bold 17px Arial'; // Увеличен размер шрифта (было 10px)
+        ctx.textAlign = 'center'; // Выравнивание по центру
+        ctx.textBaseline = 'middle'; // Выравнивание по вертикали
+        ctx.fillText(this.ammo, 0, 0); // Рисуем текст в центре (0, 0) локальных координат
 
         ctx.restore();
     }

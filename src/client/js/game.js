@@ -35,6 +35,12 @@ class Game {
         this.targetFovAngle = this.baseFovAngle;
         this.fovTransitionSpeed = 0.1; 
 
+        // Crosshair properties
+        this.baseCrosshairRadius = 20; // Базовый радиус (увеличен)
+        this.targetCrosshairRadius = this.baseCrosshairRadius;
+        this.currentCrosshairRadius = this.baseCrosshairRadius;
+        this.crosshairTransitionSpeed = 0.15; // Скорость изменения прицела
+
         // Set canvas size (will also resize fogCanvas)
         this.resizeCanvas();
         window.addEventListener('resize', () => this.resizeCanvas());
@@ -71,16 +77,15 @@ class Game {
     }
 
     gameLoop(timestamp) {
-        const deltaTime = (timestamp - this.lastTime) || 0; // Ensure deltaTime is not NaN on first frame
+        const deltaTime = (timestamp - this.lastTime) || 0; 
         this.lastTime = timestamp;
 
-        // Update game state
-        this.update(deltaTime);
+        // Update game state and get input
+        const input = this.update(deltaTime);
         
-        // Render game
-        this.render();
+        // Render game, passing the input
+        this.render(input); 
         
-        // Request next frame
         requestAnimationFrame((time) => this.gameLoop(time));
     }
 
@@ -107,6 +112,20 @@ class Game {
         this.currentWorldViewRadius += (this.targetWorldViewRadius - this.currentWorldViewRadius) * this.fovTransitionSpeed;
         this.currentFovAngle += (this.targetFovAngle - this.currentFovAngle) * this.fovTransitionSpeed;
 
+        // --- Update Target & Interpolate Crosshair Radius ---
+        if (input.isRightMouseDown) {
+            this.targetCrosshairRadius = this.baseCrosshairRadius / 2; 
+        } else {
+            this.targetCrosshairRadius = this.baseCrosshairRadius; 
+        }
+        const prevCrosshairRadius = this.currentCrosshairRadius;
+        this.currentCrosshairRadius += (this.targetCrosshairRadius - this.currentCrosshairRadius) * this.crosshairTransitionSpeed;
+        // --- DEBUG LOG --- 
+        // if (Math.abs(prevCrosshairRadius - this.currentCrosshairRadius) > 0.1) {
+        //     console.log(`RMB: ${input.isRightMouseDown}, TargetR: ${this.targetCrosshairRadius.toFixed(1)}, CurrentR: ${this.currentCrosshairRadius.toFixed(1)}`);
+        // }
+        // --- END DEBUG LOG ---
+
         // --- Calculate World Mouse Coordinates ---
         const cameraX = this.canvas.width / 2 - this.player.x * this.zoom;
         const cameraY = this.canvas.height / 2 - this.player.y * this.zoom;
@@ -120,11 +139,14 @@ class Game {
         };
 
         this.gameEngine.update(deltaTime, inputForEngine);
+
+        // Return the input object for render method
+        return input;
     }
 
-    render() {
+    render(input) {
         // Clear main canvas
-        this.ctx.fillStyle = '#1a1a1a'; 
+        this.ctx.fillStyle = 'rgb(37, 37, 37)'; 
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
         // --- Render world with camera offset AND zoom ---
@@ -205,46 +227,66 @@ class Game {
             visibilityPoints.push({ x: finalPointScreenX, y: finalPointScreenY });
         }
 
-        // Создаем полигон видимости на fogCanvas
+        // --- Create visibility polygon and gradient --- 
         if (visibilityPoints.length > 0) {
+            // --- Cutout Main FOV Polygon ---
             this.fogCtx.beginPath();
-            this.fogCtx.moveTo(playerScreenX, playerScreenY); // Начинаем с игрока
+            this.fogCtx.moveTo(playerScreenX, playerScreenY); 
             visibilityPoints.forEach(p => this.fogCtx.lineTo(p.x, p.y));
             this.fogCtx.closePath();
 
-            // Создаем радиальный градиент для плавного края
-            // Радиус градиента соответствует максимальной дальности лучей на экране
-            const screenViewRadius = worldViewRadius * this.zoom;
-            const gradient = this.fogCtx.createRadialGradient(
-                playerScreenX, playerScreenY, screenViewRadius * 0.2, // Inner circle (почти полностью прозрачный туман)
-                playerScreenX, playerScreenY, screenViewRadius      // Outer circle (полностью непрозрачный туман)
+            // Main FOV gradient (based on raycast distance)
+            const screenViewRadius = this.currentWorldViewRadius * this.zoom;
+            const fovGradient = this.fogCtx.createRadialGradient( 
+                playerScreenX, playerScreenY, screenViewRadius * 0.2, 
+                playerScreenX, playerScreenY, screenViewRadius 
             );
-            gradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); // Opaque alpha at center (clears fog)
-            gradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); // Transparent alpha at edge (keeps fog)
+            fovGradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); 
+            fovGradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); 
 
-            // Вырезаем полигон из тумана, используя градиент
+            // Apply main FOV cutout
             this.fogCtx.globalCompositeOperation = 'destination-out';
-            this.fogCtx.fillStyle = gradient; // Используем градиент для заливки
+            this.fogCtx.fillStyle = fovGradient; 
             this.fogCtx.fill();
+            // Keep globalCompositeOperation as 'destination-out' for the next step
+
+            // --- Cutout Close-Range Circle ---
+            const closeRadiusWorld = 100; // Увеличено (было 70)
+            const closeRadiusScreen = closeRadiusWorld * this.zoom;
+            
+            // Close-range gradient
+            const closeGradient = this.fogCtx.createRadialGradient(
+                playerScreenX, playerScreenY, 0, // Start fully clear at the center
+                playerScreenX, playerScreenY, closeRadiusScreen // Fade to fully fogged at edge
+            );
+            closeGradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); // Clear fog at center
+            closeGradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); // Keep fog at edge
+            
+            // Draw the circle for close range view
+            this.fogCtx.beginPath();
+            this.fogCtx.arc(playerScreenX, playerScreenY, closeRadiusScreen, 0, Math.PI * 2);
+            this.fogCtx.closePath();
+            
+            // Apply close-range cutout (still using destination-out)
+            this.fogCtx.fillStyle = closeGradient;
+            this.fogCtx.fill();
+
+            // Reset composite operation only after both cutouts are done
             this.fogCtx.globalCompositeOperation = 'source-over'; 
         }
 
-        // Рисуем результат поверх мира
+        // Draw fog canvas
         this.ctx.drawImage(this.fogCanvas, 0, 0);
         // --- End Fog of War ---
 
         // --- Render Custom Crosshair ---
-        const mouseInput = this.inputHandler.getInput(); // Get latest raw mouse coords
-        if (mouseInput.rawMouseX !== undefined && mouseInput.rawMouseY !== undefined) {
-            const crosshairRadius = 10; // Базовый радиус прицела
-            // Масштабируем радиус прицела вместе с зумом мира для консистентности
-            const scaledRadius = crosshairRadius * this.zoom; // Вариант 1: Масштабируется с миром
-            //const scaledRadius = crosshairRadius; // Вариант 2: Фиксированный размер на экране
-
-            this.ctx.strokeStyle = '#ffffff'; // Белый цвет
-            this.ctx.lineWidth = 1; // Толщина 1 пиксель
+        if (input.rawMouseX !== undefined && input.rawMouseY !== undefined) {
+            const crosshairRadius = this.currentCrosshairRadius; 
+            const scaledRadius = crosshairRadius * this.zoom; 
+            this.ctx.strokeStyle = '#ffffff'; 
+            this.ctx.lineWidth = 1; 
             this.ctx.beginPath();
-            this.ctx.arc(mouseInput.rawMouseX, mouseInput.rawMouseY, scaledRadius, 0, Math.PI * 2);
+            this.ctx.arc(input.rawMouseX, input.rawMouseY, scaledRadius, 0, Math.PI * 2);
             this.ctx.stroke();
         }
         // --- End Custom Crosshair ---
