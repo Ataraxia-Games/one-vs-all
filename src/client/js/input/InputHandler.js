@@ -6,11 +6,13 @@ export class InputHandler {
             s: false,
             d: false
         };
+        this.isShiftDown = false; // Состояние Shift
         // Store raw screen coordinates
         this.rawMouseX = undefined;
         this.rawMouseY = undefined;
         this.wheelDelta = 0; // Store wheel delta
         this.isRightMouseDown = false; // Состояние ПКМ
+        this.isLeftMouseClick = false; // Флаг для одиночного клика ЛКМ
 
         // Keyboard event listeners
         window.addEventListener('keydown', (e) => this.handleKeyDown(e));
@@ -45,6 +47,10 @@ export class InputHandler {
             case 'ArrowRight':
                 this.keys.d = true;
                 break;
+            case 'ShiftLeft': 
+            case 'ShiftRight': 
+                this.isShiftDown = true; 
+                break;
         }
     }
 
@@ -66,6 +72,10 @@ export class InputHandler {
             case 'ArrowRight':
                 this.keys.d = false;
                 break;
+            case 'ShiftLeft': 
+            case 'ShiftRight': 
+                this.isShiftDown = false; 
+                break;
         }
     }
 
@@ -82,27 +92,36 @@ export class InputHandler {
     }
 
     handleMouseDown(e) {
+        if (e.button === 0) { // Левая кнопка мыши
+            this.isLeftMouseClick = true; // Устанавливаем флаг клика
+        }
         if (e.button === 2) { // Правая кнопка мыши
             this.isRightMouseDown = true;
         }
     }
 
     handleMouseUp(e) {
-        if (e.button === 2) { // Правая кнопка мыши
+        // Сбрасываем флаг зажатия ПКМ
+        if (e.button === 2) { 
             this.isRightMouseDown = false;
         }
+        // Примечание: isLeftMouseClick сбрасывается в getInput
     }
 
     getInput() {
         const currentWheelDelta = this.wheelDelta;
-        this.wheelDelta = 0; // Reset delta after reading
+        this.wheelDelta = 0; 
+        const currentLeftMouseClick = this.isLeftMouseClick;
+        this.isLeftMouseClick = false; // Сбрасываем флаг клика ПОСЛЕ чтения
 
         return {
             keys: { ...this.keys },
+            isShiftDown: this.isShiftDown, // Передаем состояние Shift
             rawMouseX: this.rawMouseX,
             rawMouseY: this.rawMouseY,
             wheelDelta: currentWheelDelta,
-            isRightMouseDown: this.isRightMouseDown // Передаем состояние ПКМ
+            isRightMouseDown: this.isRightMouseDown,
+            isLeftMouseClick: currentLeftMouseClick // Передаем флаг клика
         };
     }
 } 

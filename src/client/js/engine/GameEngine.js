@@ -3,6 +3,8 @@ export class GameEngine {
         this.ctx = ctx;
         this.entities = [];
         this.walls = []; // Store walls separately for collision checks
+        this.bullets = []; // Отдельный массив для пуль
+        this.effects = []; // Массив для визуальных эффектов (круги)
     }
 
     addEntity(entity) {
@@ -11,6 +13,15 @@ export class GameEngine {
         if (entity.constructor.name === 'Wall') { 
             this.walls.push(entity);
         }
+        // Пули добавляются отдельно через addBullet
+    }
+
+    addBullet(bullet) {
+        this.bullets.push(bullet);
+    }
+
+    addEffect(effect) {
+        this.effects.push(effect);
     }
 
     removeEntity(entity) {
@@ -27,24 +38,59 @@ export class GameEngine {
         }
     }
 
+    // Метод для удаления неактивных пуль
+    cleanupBullets() {
+        this.bullets = this.bullets.filter(bullet => bullet.isActive);
+    }
+
+    cleanupEffects() {
+        this.effects = this.effects.filter(effect => effect.isActive);
+    }
+
     update(deltaTime, input) {
-        // Pass the list of walls to player update
+        // Pass the list of walls and the full input object to player update
         this.entities.forEach(entity => {
             if (entity.update) {
                 if (entity.constructor.name === 'Player') {
                     entity.update(deltaTime, input, this.walls);
                 } else {
-                    entity.update(deltaTime, input); // Other entities don't need walls
+                    // Pass full input to other entities too, if they need it
+                    entity.update(deltaTime, input);
                 }
             }
         });
+
+        // Обновляем пули
+        this.bullets.forEach(bullet => {
+            bullet.update(deltaTime, this.walls);
+        });
+
+        // Обновляем эффекты
+        this.effects.forEach(effect => {
+            effect.update(deltaTime);
+        });
+
+        // Очистка
+        this.cleanupBullets();
+        this.cleanupEffects();
     }
 
     render() {
+        // Рендерим основные сущности (игроки, стены)
         this.entities.forEach(entity => {
             if (entity.render) {
                 entity.render(this.ctx);
             }
         });
+
+        // Рендерим пули
+        this.bullets.forEach(bullet => {
+            bullet.render(this.ctx);
+        });
+
+        // ЭФФЕКТЫ БОЛЬШЕ НЕ РЕНДЕРЯТСЯ ЗДЕСЬ
+        // this.effects.forEach(effect => {
+        //     effect.render(this.ctx);
+        // });
     }
 } 

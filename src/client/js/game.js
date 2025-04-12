@@ -4,6 +4,7 @@ import { Wall } from './entities/Wall.js';
 import { MapGenerator } from './entities/MapGenerator.js';
 import { InputHandler } from './input/InputHandler.js';
 import { intersectSegments } from './utils/geometry.js'; // Импортируем утилиту
+import { SpeedCircle } from './entities/SpeedCircle.js';
 
 class Game {
     constructor() {
@@ -54,8 +55,11 @@ class Game {
     }
 
     initGame() {
-        // Create player in the center of the world
         this.player = new Player(this.worldWidth / 2, this.worldHeight / 2);
+        // Привязываем обработчик для создания кругов
+        this.player.onSpeedCircle = (x, y) => {
+            this.gameEngine.addEffect(new SpeedCircle(x, y));
+        };
         this.gameEngine.addEntity(this.player);
 
         // Generate boundary walls for the world
@@ -132,13 +136,19 @@ class Game {
         const worldMouseX = (input.rawMouseX - cameraX) / this.zoom;
         const worldMouseY = (input.rawMouseY - cameraY) / this.zoom;
         
-        // Prepare input object for game engine
-        const inputForEngine = {
-            keys: input.keys,
-            mouse: { x: worldMouseX, y: worldMouseY } 
-        };
+        // Add calculated world mouse coordinates to the main input object
+        input.mouse = { x: worldMouseX, y: worldMouseY }; 
 
-        this.gameEngine.update(deltaTime, inputForEngine);
+        // Pass the FULL input object to the engine
+        this.gameEngine.update(deltaTime, input);
+
+        // --- Handle Shooting Input ---
+        if (input.isLeftMouseClick) {
+            const newBullets = this.player.shoot();
+            if (newBullets.length > 0) {
+                newBullets.forEach(bullet => this.gameEngine.addBullet(bullet));
+            }
+        }
 
         // Return the input object for render method
         return input;
@@ -146,7 +156,7 @@ class Game {
 
     render(input) {
         // Clear main canvas
-        this.ctx.fillStyle = 'rgb(37, 37, 37)'; 
+        this.ctx.fillStyle = 'rgb(78, 87, 40)'; 
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
         // --- Render world with camera offset AND zoom ---
@@ -278,6 +288,21 @@ class Game {
         // Draw fog canvas
         this.ctx.drawImage(this.fogCanvas, 0, 0);
         // --- End Fog of War ---
+
+        // --- Render World Effects (e.g., speed circles) OVER the fog ---
+        // Apply camera transform again for world-based effects
+        this.ctx.save();
+        this.ctx.translate(cameraX, cameraY); // Используем те же cameraX, cameraY, что и для мира
+        this.ctx.scale(this.zoom, this.zoom);
+
+        this.gameEngine.effects.forEach(effect => {
+            if (effect.render) { // Проверяем, есть ли метод render
+                effect.render(this.ctx);
+            }
+        });
+
+        this.ctx.restore(); // Убираем трансформацию камеры для эффектов
+        // --- End World Effects ---
 
         // --- Render Custom Crosshair ---
         if (input.rawMouseX !== undefined && input.rawMouseY !== undefined) {

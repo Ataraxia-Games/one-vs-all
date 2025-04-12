@@ -1,4 +1,5 @@
 import { checkCircleWallCollision } from '../utils/collision.js';
+import { Bullet } from './Bullet.js';
 
 export class Player {
     constructor(x, y) {
@@ -10,19 +11,32 @@ export class Player {
         this.width = 30; // Keep for potential future use or rendering reference
         this.height = 30;
         this.ammo = 10; // Начальное количество патронов
+
+        // Параметры дробовика
+        this.shotgunPellets = 8;
+        this.shotgunSpread = Math.PI / 18; // Угол разброса (10 градусов)
+        this.bulletSpeed = 600;
+        this.bulletLifetime = 500; // ms
+
+        // Speed circle properties
+        this.speedCircleCooldown = 200; // ms между кругами
+        this.lastSpeedCircleTime = -Infinity;
     }
 
     update(deltaTime, input, walls) {
         // Convert deltaTime from ms to seconds for consistent speed calculation
         const dt = deltaTime / 1000; 
 
-        // Calculate potential movement scaled by time
+        // Determine current speed based on Shift key
+        const currentSpeed = input.isShiftDown ? this.speed * 1.5 : this.speed; // Ускорение в 1.75 раза
+
+        // Calculate potential movement scaled by time and speed
         let deltaX = 0;
         let deltaY = 0;
-        if (input.keys.w) deltaY -= this.speed * dt;
-        if (input.keys.s) deltaY += this.speed * dt;
-        if (input.keys.a) deltaX -= this.speed * dt;
-        if (input.keys.d) deltaX += this.speed * dt;
+        if (input.keys.w) deltaY -= currentSpeed * dt;
+        if (input.keys.s) deltaY += currentSpeed * dt;
+        if (input.keys.a) deltaX -= currentSpeed * dt;
+        if (input.keys.d) deltaX += currentSpeed * dt;
 
         // Normalize diagonal movement (optional but good practice)
         if (deltaX !== 0 && deltaY !== 0) {
@@ -70,12 +84,47 @@ export class Player {
         this.y = tempY;
         // --- End Collision ---
 
+        // --- DEBUG LOG --- 
+        console.log(`Shift: ${input.isShiftDown}, dX: ${deltaX.toFixed(2)}, dY: ${deltaY.toFixed(2)}`);
+        // --- END DEBUG LOG ---
+
+        // --- Generate Speed Circles if sprinting ---
+        if (input.isShiftDown && (deltaX !== 0 || deltaY !== 0)) {
+            this.tryGenerateSpeedCircle();
+        }
+
         // Handle rotation (aiming) - relative to current position
         if (input.mouse.x !== undefined && input.mouse.y !== undefined) {
             const aimDx = input.mouse.x - this.x;
             const aimDy = input.mouse.y - this.y;
             this.angle = Math.atan2(aimDy, aimDx);
         }
+    }
+
+    // Метод для создания пуль
+    shoot() {
+        if (this.ammo <= 0) {
+            console.log("Out of ammo!");
+            return []; // Возвращаем пустой массив, если нет патронов
+        }
+
+        this.ammo--; // Уменьшаем патроны
+        console.log("Ammo left:", this.ammo);
+
+        const bullets = [];
+        for (let i = 0; i < this.shotgunPellets; i++) {
+            // Добавляем случайный разброс к углу
+            const spreadAngle = this.angle + (Math.random() - 0.5) * this.shotgunSpread;
+            
+            // Создаем пулю чуть впереди игрока, чтобы она не столкнулась с ним сразу
+            const startX = this.x + Math.cos(this.angle) * (this.radius + 5); 
+            const startY = this.y + Math.sin(this.angle) * (this.radius + 5);
+
+            bullets.push(
+                new Bullet(startX, startY, spreadAngle, this.bulletSpeed, this.bulletLifetime)
+            );
+        }
+        return bullets; // Возвращаем массив созданных пуль
     }
 
     render(ctx) {
@@ -110,5 +159,17 @@ export class Player {
         ctx.fillText(this.ammo, 0, 0); // Рисуем текст в центре (0, 0) локальных координат
 
         ctx.restore();
+    }
+
+    tryGenerateSpeedCircle() {
+        const now = performance.now();
+        if (now - this.lastSpeedCircleTime > this.speedCircleCooldown) {
+            this.lastSpeedCircleTime = now;
+            // Сигнализируем игре о необходимости создать круг
+            // Game class будет отвечать за создание и добавление эффекта
+            if (this.onSpeedCircle) { // Проверяем, есть ли обработчик
+                 this.onSpeedCircle(this.x, this.y);
+            }
+        }
     }
 } 
