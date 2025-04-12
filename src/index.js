@@ -185,7 +185,7 @@ class MapGenerator {
 
 
 // -- Игровое состояние на сервере --
-const players = {}; // { socket.id: { id, x, y, angle, color, health, ammo, input:{keys, angle} }, ... }
+const players = {}; // Теперь { socket.id: { id, x, y, ..., name, health, ammo, input, lastShotTime } }
 const bullets = []; // <-- Массив для хранения активных пуль
 let nextBulletId = 0; // <-- Счетчик для уникальных ID пуль
 const worldWidth = 2000 * 1.3;
@@ -206,32 +206,42 @@ const bulletDamage = 10; // Урон от пули
 
 io.on('connection', (socket) => {
     console.log(`A user connected: ${socket.id}`);
+    // НЕ СОЗДАЕМ игрока здесь, ждем 'joinGame'
 
-    // Создаем нового игрока
-    players[socket.id] = {
-        id: socket.id,
-        x: worldWidth / 2 + (Math.random() - 0.5) * 100, 
-        y: worldHeight / 2 + (Math.random() - 0.5) * 100,
-        angle: 0,
-        color: '#000000', // <-- Все игроки черные
-        health: 100, 
-        ammo: 10,    
-        input: { keys: {}, angle: 0, isShiftDown: false },
-        lastShotTime: 0 // Добавляем время последнего выстрела для кулдауна
-    };
+    socket.on('joinGame', (data) => {
+        const playerName = data.name ? String(data.name).trim().slice(0, 16) : `Player_${socket.id.slice(0, 4)}`; // Ограничиваем имя
+        console.log(`Player ${socket.id} trying to join as "${playerName}"`);
 
-    // Готовим данные стен для отправки (только необходимые поля)
-    const wallsToSend = serverWalls.map(wall => wall.getSerializableData());
+        // TODO: Проверка, не занято ли имя?
 
-    // Отправляем новому игроку его ID, состояние игроков И СТЕНЫ
-    socket.emit('init', { 
-        id: socket.id,
-        players: players,
-        walls: wallsToSend // <-- Отправляем стены
+        // Создаем игрока
+        players[socket.id] = {
+            id: socket.id,
+            name: playerName,
+            x: worldWidth / 2 + (Math.random() - 0.5) * 100, 
+            y: worldHeight / 2 + (Math.random() - 0.5) * 100,
+            angle: 0,
+            color: '#000000', 
+            health: 100, 
+            ammo: 10,    
+            input: { keys: {}, angle: 0, isShiftDown: false },
+            lastShotTime: 0 
+        };
+
+        // Готовим данные стен для отправки
+        const wallsToSend = serverWalls.map(wall => wall.getSerializableData());
+
+        // Отправляем новому игроку его ID, состояние ВСЕХ игроков (включая себя) И СТЕНЫ
+        socket.emit('init', { 
+            id: socket.id,
+            players: players, // Отправляем весь объект players
+            walls: wallsToSend 
+        });
+
+        // Отправляем всем ОСТАЛЬНЫМ информацию о новом игроке
+        socket.broadcast.emit('playerConnected', players[socket.id]);
+        console.log(`Player "${playerName}" (${socket.id}) joined. Total players: ${Object.keys(players).length}`);
     });
-
-    // Отправляем всем остальным информацию о новом игроке
-    socket.broadcast.emit('playerConnected', players[socket.id]);
 
     // Обработка получения ввода от клиента
     socket.on('playerInput', (inputData) => {
@@ -288,8 +298,13 @@ io.on('connection', (socket) => {
     // Обработка отключения
     socket.on('disconnect', () => {
         console.log(`User disconnected: ${socket.id}`);
-        delete players[socket.id];
-        io.emit('playerDisconnected', socket.id);
+        const player = players[socket.id];
+        if (player) {
+            console.log(`Player "${player.name}" left.`);
+            delete players[socket.id];
+            io.emit('playerDisconnected', socket.id); // Сообщаем всем ID отключившегося
+            console.log(`Total players: ${Object.keys(players).length}`);
+        }
     });
 });
 
@@ -437,16 +452,17 @@ setInterval(() => {
             
             return {
                 id: p.id,
+                name: p.name,
                 x: p.x,
                 y: p.y,
                 angle: p.angle,
-                color: p.color, // Теперь всегда '#000000'
+                color: p.color,
                 health: p.health, 
                 ammo: p.ammo,     
                 isSprinting: isSprinting 
             };
         }),
-        bullets: bullets.map(bullet => ({ // Отправляем только активные
+        bullets: bullets.map(bullet => ({ 
             id: bullet.id,
             x: bullet.x,
             y: bullet.y

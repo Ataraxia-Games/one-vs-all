@@ -25,9 +25,10 @@ class Game {
         this.inputHandler = new InputHandler();
         
         // --- Сетевое состояние --- 
-        this.socket = io(); // Подключаемся к серверу
+        this.socket = null; 
         this.myPlayerId = null;
-        this.players = {}; // { id: { x, y, angle, color, ... }, ... } - состояние от сервера
+        this.myName = ""; // Сохраняем свое имя
+        this.players = {}; // Состояние игроков от сервера { id: { x, y, ..., name, health, isSprinting }, ... }
         this.playerEntities = {}; // Локальные сущности для рендеринга игроков
         this.bulletEntities = {}; // <-- Локальные сущности пуль
 
@@ -52,69 +53,92 @@ class Game {
         this.currentCrosshairRadius = this.baseCrosshairRadius;
         this.crosshairTransitionSpeed = 0.15; // Скорость изменения прицела
 
-        this.setupSocketListeners();
-        this.initGame();
+        // НЕ подключаемся и не запускаем цикл здесь
+        // this.setupSocketListeners();
+        // this.initGame(); 
+        // this.resizeCanvas(); 
+        // window.addEventListener('resize', () => this.resizeCanvas());
+        // this.lastTime = 0;
+        // requestAnimationFrame((time) => this.gameLoop(time));
+    }
+
+    // Вызывается после ввода имени
+    connectAndJoin(playerName) {
+        this.myName = playerName;
+        console.log(`Attempting to join as ${this.myName}`);
+        this.socket = io(); // Устанавливаем соединение
+        this.setupSocketListeners(); // Настраиваем слушатели
+
+        // Отправляем имя на сервер
+        this.socket.emit('joinGame', { name: this.myName });
+
+        // Инициализация после ответа сервера
+    }
+
+    // Инициализация игры и UI после получения 'init' от сервера
+    initializeGameInternal() {
+        console.log("Initializing game internally after server ack.");
+        this.initGame(); // Локальная инициализация (если нужна)
         this.resizeCanvas();
         window.addEventListener('resize', () => this.resizeCanvas());
-        this.lastTime = 0;
+        this.lastTime = performance.now(); // Используем performance.now()
         requestAnimationFrame((time) => this.gameLoop(time));
+
+        // Показываем канвас, скрываем UI входа
+        document.getElementById('join-ui').style.display = 'none';
+        this.canvas.style.display = 'block';
     }
 
     setupSocketListeners() {
+        if (!this.socket) return;
+
         this.socket.on('connect', () => {
-            console.log('Connected to server with ID:', this.socket.id);
+            // Не выводим ID здесь, он придет в 'init'
+            console.log('Socket connected...'); 
         });
 
         this.socket.on('init', (data) => {
             console.log('Initialization data received:', data);
-            this.myPlayerId = data.id;
-            this.players = data.players;
-            // Получаем стены от сервера
-            this.gameEngine.clearWalls(); // Очищаем старые стены (на всякий случай)
-            if (data.walls && Array.isArray(data.walls)) {
-                data.walls.forEach(wallData => {
-                    // Создаем сущность Wall на основе данных с сервера
-                    const wall = new Wall(
-                        wallData.x,
-                        wallData.y,
-                        wallData.length,
-                        wallData.angle,
-                        wallData.color // Используем цвет с сервера
-                        // Ширина стены wallData.width теперь устанавливается в конструкторе Wall по умолчанию
-                    );
-                    this.gameEngine.addEntity(wall); 
-                });
-                console.log(`Added ${data.walls.length} walls from server.`);
-            } else {
-                console.warn("No walls data received from server or data is invalid.");
-            }
-            this.syncPlayerEntities(); // Синхронизируем игроков после получения начального состояния
-        });
-
-        this.socket.on('playerConnected', (playerData) => {
-            console.log('Player connected:', playerData.id);
-            this.players[playerData.id] = playerData;
-            this.syncPlayerEntities(); 
-        });
-
-        this.socket.on('playerDisconnected', (playerId) => {
-            console.log('Player disconnected:', playerId);
-            delete this.players[playerId];
-             if (this.playerEntities[playerId]) {
-                 this.gameEngine.removeEntity(this.playerEntities[playerId]);
-                 delete this.playerEntities[playerId];
+            if (data.id) { // Успешная инициализация
+                this.myPlayerId = data.id;
+                this.players = data.players; // Теперь содержит name и health
+                this.gameEngine.clearWalls(); 
+                if (data.walls && Array.isArray(data.walls)) {
+                    data.walls.forEach(wallData => {
+                        // Создаем сущность Wall на основе данных с сервера
+                        const wall = new Wall(
+                            wallData.x,
+                            wallData.y,
+                            wallData.length,
+                            wallData.angle,
+                            wallData.color // Используем цвет с сервера
+                            // Ширина стены wallData.width теперь устанавливается в конструкторе Wall по умолчанию
+                        );
+                        this.gameEngine.addEntity(wall); 
+                    });
+                    console.log(`Added ${data.walls.length} walls from server.`);
+                } else {
+                    console.warn("No walls data received from server or data is invalid.");
+                }
+                this.syncPlayerEntities();
+                this.initializeGameInternal(); // <<-- Запускаем игру и UI здесь
+            } else if (data.error) { // Обработка ошибки (например, имя занято)
+                console.error("Join error:", data.error);
+                document.getElementById('joinError').textContent = data.error;
+                document.getElementById('joinError').style.display = 'block';
+                this.socket.disconnect(); // Отключаемся
+                this.socket = null;
             }
         });
 
         this.socket.on('gameStateUpdate', (gameState) => {
-            // Обновляем состояние игроков
+            if (!this.myPlayerId) return; // Не обрабатываем до инициализации
+            // Обновляем игроков (включая name, health)
             if (gameState.players) {
                 gameState.players.forEach(serverPlayer => {
                     if (this.players[serverPlayer.id]) {
-                        // Просто копируем данные с сервера
                         Object.assign(this.players[serverPlayer.id], serverPlayer);
                     } else {
-                        // Игрок появился между init и первым апдейтом
                         this.players[serverPlayer.id] = serverPlayer;
                     }
                 });
@@ -123,8 +147,32 @@ class Game {
             if (gameState.bullets) {
                 this.syncBulletEntities(gameState.bullets);
             }
-             this.syncPlayerEntities(); // Обновляем локальные сущности
+             this.syncPlayerEntities(); 
         });
+        
+        this.socket.on('playerConnected', (playerData) => {
+            if (!this.myPlayerId) return;
+            console.log('Player connected:', playerData.id, playerData.name);
+            this.players[playerData.id] = playerData; // Добавляем нового игрока
+            this.syncPlayerEntities(); 
+        });
+
+        this.socket.on('playerDisconnected', (playerId) => {
+             if (!this.myPlayerId) return;
+            console.log('Player disconnected:', playerId);
+             // Удаляем из players
+            if (this.players[playerId]) {
+                 console.log(`Removing player ${this.players[playerId].name} from list.`);
+                 delete this.players[playerId];
+             }
+             // Удаляем сущность
+             if (this.playerEntities[playerId]) {
+                 this.gameEngine.removeEntity(this.playerEntities[playerId]);
+                 delete this.playerEntities[playerId];
+            }
+        });
+        
+        // TODO: Добавить обработчик 'disconnect' для возврата к экрану входа
     }
 
     // Синхронизирует локальные сущности с серверным состоянием players
@@ -285,16 +333,13 @@ class Game {
     }
 
     gameLoop(timestamp) {
-        const deltaTime = (timestamp - this.lastTime) || 0; 
+        if (!this.socket || !this.myPlayerId) return; // Не запускаем цикл без подключения
+
+        const deltaTime = timestamp - this.lastTime; 
         this.lastTime = timestamp;
 
-        // Update game state and get input
         const input = this.update(deltaTime);
-
-        // Interpolate other players' positions
         this.interpolateEntities(); 
-        
-        // Render game, passing the input
         this.render(input); 
         
         requestAnimationFrame((time) => this.gameLoop(time));
@@ -389,7 +434,7 @@ class Game {
     }
 
     render(input) {
-        if (!this.myPlayerId || !this.player) return; // Ничего не рендерим, пока не готовы
+        if (!this.myPlayerId || !this.player) return; 
 
         // --- Расчет цвета фона (используем this.player) ---
         let backgroundColor = 'rgb(78, 87, 40)';
@@ -475,12 +520,22 @@ class Game {
             const fovGradient = this.fogCtx.createRadialGradient( playerScreenX, playerScreenY, screenViewRadius * 0.2, playerScreenX, playerScreenY, screenViewRadius );
             fovGradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); fovGradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); 
             this.fogCtx.globalCompositeOperation = 'destination-out'; this.fogCtx.fillStyle = fovGradient; this.fogCtx.fill();
-            const closeRadiusWorld = 140; const closeRadiusScreen = closeRadiusWorld * this.zoom;
-            const closeGradient = this.fogCtx.createRadialGradient(playerScreenX, playerScreenY, 0, playerScreenX, playerScreenY, closeRadiusScreen );
-            closeGradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); closeGradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); 
-            this.fogCtx.beginPath(); this.fogCtx.arc(playerScreenX, playerScreenY, closeRadiusScreen, 0, Math.PI * 2); this.fogCtx.closePath();
-            this.fogCtx.fillStyle = closeGradient; this.fogCtx.fill();
-            this.fogCtx.globalCompositeOperation = 'source-over'; 
+            const closeRadiusWorld = 70; const closeRadiusScreen = closeRadiusWorld * this.zoom;
+            const closeGradient = this.fogCtx.createRadialGradient(
+                playerScreenX, playerScreenY, 0, // Центр
+                playerScreenX, playerScreenY, closeRadiusScreen // Край
+            );
+            // Линейный градиент: ИНВЕРТИРОВАН - от невидимого к видимому
+            closeGradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); // Невидимый центр (непрозрачный цвет стирает под 'destination-out')
+            closeGradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); // Видимый край (прозрачный цвет НЕ стирает)
+            
+            this.fogCtx.globalCompositeOperation = 'destination-out'; // Стираем туман
+            this.fogCtx.beginPath();
+            this.fogCtx.arc(playerScreenX, playerScreenY, closeRadiusScreen, 0, Math.PI * 2);
+            this.fogCtx.closePath();
+            this.fogCtx.fillStyle = closeGradient; 
+            this.fogCtx.fill();
+            this.fogCtx.globalCompositeOperation = 'source-over'; // Возвращаем обычный режим
         }
         this.ctx.drawImage(this.fogCanvas, 0, 0);
         // --- End Fog of War ---
@@ -505,10 +560,124 @@ class Game {
             this.ctx.stroke();
         }
         // --- End Custom Crosshair ---
+
+        // --- Render UI --- 
+        this.renderPlayerList(); // Отрисовка списка игроков
+        this.renderCrosshair(input); // Отрисовка прицела
+    }
+
+    // Новый метод для отрисовки списка игроков
+    renderPlayerList() {
+        const padding = 10;
+        const startX = this.canvas.width - padding;
+        let startY = padding;
+        const fontSize = 14;
+        const lineHeight = fontSize * 1.3;
+
+        this.ctx.save();
+        this.ctx.font = `${fontSize}px Arial`;
+        this.ctx.textAlign = 'right';
+        this.ctx.textBaseline = 'top';
+
+        // Получаем массив игроков из this.players и сортируем (опционально)
+        const playerList = Object.values(this.players);
+        // Можно добавить сортировку, например, по имени или ID
+        // playerList.sort((a, b) => a.name.localeCompare(b.name));
+
+        playerList.forEach(player => {
+            const name = player.name || `Player ${player.id}`; // Запасной вариант имени
+            const isDead = player.health <= 0;
+            
+            this.ctx.fillStyle = isDead ? 'red' : 'white';
+            this.ctx.shadowColor = 'black';
+            this.ctx.shadowBlur = 1;
+
+            let displayName = name;
+            if (player.id === this.myPlayerId) {
+                displayName = `> ${name} <`; // Выделяем себя
+            }
+
+            this.ctx.fillText(displayName, startX, startY);
+
+            // Добавляем зачеркивание для мертвых
+            if (isDead) {
+                const textWidth = this.ctx.measureText(displayName).width;
+                this.ctx.strokeStyle = 'red';
+                this.ctx.lineWidth = 1;
+                this.ctx.beginPath();
+                this.ctx.moveTo(startX - textWidth, startY + fontSize / 2);
+                this.ctx.lineTo(startX, startY + fontSize / 2);
+                this.ctx.stroke();
+            }
+
+            startY += lineHeight; // Сдвигаем Y для следующего имени
+        });
+
+        this.ctx.restore();
+    }
+
+    // Переименован метод для ясности
+    renderCrosshair(input) {
+        if (input && input.rawMouseX !== undefined) {
+             // ... (код отрисовки прицела) ...
+             this.ctx.stroke();
+        }
     }
 }
 
-// Start the game when the page loads
-window.addEventListener('load', () => {
-    new Game();
+// --- Start the game (теперь по кнопке) ---
+document.addEventListener('DOMContentLoaded', () => {
+    const joinUi = document.getElementById('join-ui');
+    const nameInput = document.getElementById('playerNameInput');
+    const joinButton = document.getElementById('joinButton');
+    const joinError = document.getElementById('joinError');
+    const gameCanvas = document.getElementById('gameCanvas');
+
+    if (!joinUi || !nameInput || !joinButton || !joinError || !gameCanvas) {
+        console.error("Required UI elements not found!");
+        return;
+    }
+
+    // Фокус на поле ввода имени
+    nameInput.focus();
+
+    // Обработчик нажатия Enter в поле имени
+    nameInput.addEventListener('keypress', (event) => {
+        if (event.key === 'Enter') {
+            joinButton.click(); // Имитируем клик по кнопке
+        }
+    });
+
+    joinButton.addEventListener('click', () => {
+        const playerName = nameInput.value.trim();
+        joinError.style.display = 'none'; // Скрываем прошлые ошибки
+
+        if (!playerName) {
+            joinError.textContent = 'Пожалуйста, введите имя.';
+            joinError.style.display = 'block';
+            nameInput.focus();
+            return;
+        }
+
+        // Блокируем кнопку и поле ввода на время подключения
+        nameInput.disabled = true;
+        joinButton.disabled = true;
+        joinButton.textContent = 'Подключение...';
+
+        // Создаем и запускаем игру
+        const game = new Game();
+        game.connectAndJoin(playerName);
+        
+        // Обработка неудачного подключения (если сокет не инициализировался или была ошибка в init)
+        // Можно добавить таймер или проверку в слушателе 'disconnect' в Game
+        // пока просто разблокируем, если что-то пошло не так через 5 секунд
+        setTimeout(() => {
+            if (!game.socket || !game.myPlayerId) { // Если не подключились успешно
+                 nameInput.disabled = false;
+                 joinButton.disabled = false;
+                 joinButton.textContent = 'Присоединиться';
+                 // Ошибку покажет обработчик 'init'
+            }
+        }, 5000); 
+    });
 }); 

@@ -11,13 +11,63 @@
             overflow: hidden;
             background-color: #000;
         }
+        /* Стили для интерфейса входа */
+        #join-ui {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            color: white;
+            z-index: 10; /* Чтобы было поверх канваса, если он вдруг виден */
+        }
+        #join-ui h2 {
+             margin-top: 0;
+        }
+        #join-ui input {
+            padding: 10px;
+            margin-bottom: 15px; /* Отступ снизу */
+            margin-right: 5px;
+            border: none;
+            border-radius: 5px;
+            width: calc(100% - 22px); /* Ширина поля ввода */
+        }
+        #join-ui button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+            width: 100%; /* Кнопка на всю ширину */
+        }
+        #join-ui button:hover {
+            background-color: #45a049;
+        }
+         #join-ui button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #joinError {
+            margin-top: 10px;
+        }
         canvas {
-            display: block;
+            /* display: block; */ /* Убираем это */
             cursor: none;
+            display: none; /* Скрываем канвас по умолчанию */
         }
     </style>
 </head>
 <body>
+    <div id="join-ui">
+        <h2>Введите ваше имя:</h2>
+        <input type="text" id="playerNameInput" placeholder="Имя игрока" maxlength="16"/>
+        <button id="joinButton">Присоединиться</button>
+        <p id="joinError" style="color: red; display: none;"></p>
+    </div>
     <canvas id="gameCanvas"></canvas>
     <script src="/socket.io/socket.io.js"></script>
     <script src="js/game.js" type="module"></script>
