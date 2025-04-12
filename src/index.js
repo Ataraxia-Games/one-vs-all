@@ -186,6 +186,8 @@ class MapGenerator {
 
 // -- Игровое состояние на сервере --
 const players = {}; // { socket.id: { id, x, y, angle, color, health, ammo, input:{keys, angle} }, ... }
+const bullets = []; // <-- Массив для хранения активных пуль
+let nextBulletId = 0; // <-- Счетчик для уникальных ID пуль
 const worldWidth = 2000 * 1.3;
 const worldHeight = 2000 * 1.3;
 // Генерируем стены ОДИН РАЗ при старте сервера
@@ -194,16 +196,13 @@ const serverWalls = mapGenerator.getWalls(); // Теперь содержит с
 console.log(`Generated ${serverWalls.length} walls on the server.`);
 const playerSpeed = 200; 
 const playerRadius = 15;
-
-// Функция для генерации случайного цвета 
-function getRandomColor() {
-    const letters = '0123456789ABCDEF';
-    let color = '#';
-    for (let i = 0; i < 6; i++) {
-        color += letters[Math.floor(Math.random() * 16)];
-    }
-    return color;
-}
+const shootCooldown = 500; // Кулдаун выстрела в мс
+const bulletSpeed = 600; // Скорость пули (пикс/сек)
+const bulletLifetime = 1000; // Время жизни пули в мс
+const shotgunPellets = 7; // Кол-во дробинок
+const shotgunSpread = Math.PI / 12; // Разброс дроби
+const bulletRadius = 2; // Добавим радиус пули для столкновений
+const bulletDamage = 10; // Урон от пули
 
 io.on('connection', (socket) => {
     console.log(`A user connected: ${socket.id}`);
@@ -214,10 +213,11 @@ io.on('connection', (socket) => {
         x: worldWidth / 2 + (Math.random() - 0.5) * 100, 
         y: worldHeight / 2 + (Math.random() - 0.5) * 100,
         angle: 0,
-        color: getRandomColor(),
+        color: '#000000', // <-- Все игроки черные
         health: 100, 
         ammo: 10,    
-        input: { keys: {}, angle: 0 } 
+        input: { keys: {}, angle: 0, isShiftDown: false },
+        lastShotTime: 0 // Добавляем время последнего выстрела для кулдауна
     };
 
     // Готовим данные стен для отправки (только необходимые поля)
@@ -238,7 +238,7 @@ io.on('connection', (socket) => {
         const player = players[socket.id];
         if (!player) return; 
 
-        player.input = inputData; 
+        player.input = inputData;
         player.angle = inputData.angle; 
     });
 
@@ -246,8 +246,43 @@ io.on('connection', (socket) => {
     socket.on('playerShoot', () => {
         const player = players[socket.id];
         if (!player) return;
-        // TODO: Реализовать логику выстрела (создание пуль на сервере)
-        console.log(`Player ${socket.id} wants to shoot.`);
+
+        const now = Date.now(); // Используем Date.now() на сервере
+        // Проверка кулдауна и патронов
+        if (now - player.lastShotTime < shootCooldown) {
+            // console.log(`Player ${socket.id} shoot cooldown active.`);
+            return; // Еще не время
+        }
+        if (player.ammo <= 0) {
+            // console.log(`Player ${socket.id} out of ammo.`);
+            return; // Нет патронов
+        }
+
+        console.log(`Player ${socket.id} shoots!`);
+        player.lastShotTime = now; // Обновляем время последнего выстрела
+        player.ammo--; // Уменьшаем патроны
+
+        // Создаем пули (дробовик)
+        for (let i = 0; i < shotgunPellets; i++) {
+            const spreadAngle = player.angle + (Math.random() - 0.5) * shotgunSpread;
+            // Создаем пулю чуть впереди игрока
+            const startX = player.x + Math.cos(player.angle) * (playerRadius + 5); 
+            const startY = player.y + Math.sin(player.angle) * (playerRadius + 5);
+            
+            const newBullet = {
+                id: nextBulletId++,
+                ownerId: player.id,
+                x: startX,
+                y: startY,
+                angle: spreadAngle,
+                speed: bulletSpeed,
+                spawnTime: now, // Время создания для расчета времени жизни
+                lifetime: bulletLifetime,
+                radius: bulletRadius, // <-- Добавляем радиус
+                isActive: true
+            };
+            bullets.push(newBullet); // Добавляем пулю в массив
+        }
     });
 
     // Обработка отключения
@@ -308,11 +343,44 @@ function updatePlayer(player, dt) {
     // Ограничение по краям мира (грубое)
     player.x = Math.max(playerRadius, Math.min(worldWidth - playerRadius, player.x));
     player.y = Math.max(playerRadius, Math.min(worldHeight - playerRadius, player.y));
+
+    // Ограничение по здоровью
+    if (player.health < 0) player.health = 0;
+}
+
+// --- Логика обновления пули на сервере ---
+function updateBullet(bullet, dt, walls) {
+    // Движение
+    const moveX = Math.cos(bullet.angle) * bullet.speed * dt;
+    const moveY = Math.sin(bullet.angle) * bullet.speed * dt;
+    const nextX = bullet.x + moveX;
+    const nextY = bullet.y + moveY;
+
+    // Проверка времени жизни
+    const aliveTime = Date.now() - bullet.spawnTime;
+    if (aliveTime > bullet.lifetime) {
+        bullet.isActive = false; // Помечаем для удаления
+        return; // Дальше проверять не нужно
+    }
+
+    // Проверка столкновений пуля-стена
+    for (const wall of walls) {
+        if (checkCircleWallCollision({ x: nextX, y: nextY, radius: bullet.radius }, wall).collided) {
+            bullet.isActive = false;
+            return; // Пуля исчезает при столкновении со стеной
+        }
+    }
+
+    // Обновляем позицию, если не было столкновений
+    bullet.x = nextX;
+    bullet.y = nextY;
+    // TODO: Проверка столкновений пуля-игрок (будет в основном цикле)
 }
 
 // --- Серверный игровой цикл --- 
 const TICK_RATE = 30; 
 setInterval(() => {
+    const now = Date.now();
     const dt = (1000 / TICK_RATE) / 1000; 
 
     // Обновляем всех игроков
@@ -320,21 +388,69 @@ setInterval(() => {
         updatePlayer(player, dt);
     });
 
-    // TODO: Обновить ботов
-    // TODO: Обновить пули 
+    // Обновляем все пули (движение, время жизни, столкновения со стенами)
+    bullets.forEach(bullet => {
+        if (bullet.isActive) { 
+            updateBullet(bullet, dt, serverWalls);
+        }
+    });
+
+    // Проверка столкновений Пуля-Игрок
+    bullets.forEach(bullet => {
+        if (!bullet.isActive) return; // Пропускаем неактивные пули
+
+        Object.values(players).forEach(player => {
+            if (!player || player.health <= 0) return; // Пропускаем отсутствующих или мертвых игроков
+            if (bullet.ownerId === player.id) return; // Игрок не может попасть в себя
+
+            // Простая проверка столкновения кругов
+            const dx = bullet.x - player.x;
+            const dy = bullet.y - player.y;
+            const distSq = dx * dx + dy * dy;
+            const radiiSumSq = (bullet.radius + playerRadius) * (bullet.radius + playerRadius);
+
+            if (distSq < radiiSumSq) {
+                // Столкновение!
+                player.health -= bulletDamage;
+                if (player.health < 0) player.health = 0;
+                bullet.isActive = false; // Пуля исчезает
+                console.log(`Player ${player.id} hit by bullet ${bullet.id}! Health: ${player.health}`);
+                // TODO: Отправить событие о попадании клиентам? (для звука/эффекта)
+                return; // Пуля может поразить только одного игрока за тик
+            }
+        });
+    });
+
+    // Удаляем неактивные пули
+    const activeBullets = bullets.filter(bullet => bullet.isActive);
+    if (activeBullets.length !== bullets.length) {
+        bullets.length = 0; 
+        bullets.push(...activeBullets); 
+    }
 
     // Собираем состояние для отправки
     const gameState = {
-        players: Object.values(players).map(p => ({
-            id: p.id,
-            x: p.x,
-            y: p.y,
-            angle: p.angle,
-            color: p.color,
-            health: p.health, 
-            ammo: p.ammo     
-        })),
-        bullets: [] 
+        players: Object.values(players).map(p => {
+            const inputKeys = p.input.keys || {};
+            const isMoving = inputKeys.w || inputKeys.a || inputKeys.s || inputKeys.d;
+            const isSprinting = !!(isMoving && p.input.isShiftDown); 
+            
+            return {
+                id: p.id,
+                x: p.x,
+                y: p.y,
+                angle: p.angle,
+                color: p.color, // Теперь всегда '#000000'
+                health: p.health, 
+                ammo: p.ammo,     
+                isSprinting: isSprinting 
+            };
+        }),
+        bullets: bullets.map(bullet => ({ // Отправляем только активные
+            id: bullet.id,
+            x: bullet.x,
+            y: bullet.y
+        })) 
     };
 
     io.emit('gameStateUpdate', gameState);

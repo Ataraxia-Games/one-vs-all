@@ -46,7 +46,8 @@ export class Player {
         // Движение и столкновения теперь обрабатываются сервером
     }
 
-    // Метод для создания пуль
+    // Метод для создания пуль - БОЛЬШЕ НЕ НУЖЕН НА КЛИЕНТЕ
+    /* 
     shoot() {
         if (this.ammo <= 0) {
             console.log("Out of ammo!");
@@ -71,6 +72,7 @@ export class Player {
         }
         return bullets; // Возвращаем массив созданных пуль
     }
+    */
 
     render(ctx) {
         ctx.save();
@@ -84,15 +86,16 @@ export class Player {
         ctx.arc(0, 0, this.radius, 0, Math.PI * 2); 
         ctx.fill();
 
-        // Draw Ammo Count (если это наш игрок)
-        if (this.isSelf) { // Добавим флаг isSelf? Или проверять по ID
-            // ctx.rotate(-this.angle); // Нужно ли вращать назад? Текст уже не внутри
+        // Draw Ammo Count (УБРАНО - теперь рисуется в Game.render)
+        /*
+        if (this.isSelf) { 
             ctx.fillStyle = 'rgba(255, 255, 255, 0.71)'; 
             ctx.font = 'bold 17px Arial'; 
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(this.ammo, 0, this.radius + 15); // Рисуем под кругом
+            ctx.fillText(this.ammo, 0, this.radius + 15); 
         }
+        */
 
         ctx.restore();
     }

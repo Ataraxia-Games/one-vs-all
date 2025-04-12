@@ -4,6 +4,7 @@ import { Wall } from './entities/Wall.js';
 import { InputHandler } from './input/InputHandler.js';
 import { intersectSegments } from './utils/geometry.js'; // Импортируем утилиту
 import { SpeedCircle } from './entities/SpeedCircle.js';
+import { Bullet } from './entities/Bullet.js';
 // Socket.io клиент
 // Убедитесь, что библиотека socket.io подключена в index.html
 // <script src="/socket.io/socket.io.js"></script>
@@ -28,6 +29,7 @@ class Game {
         this.myPlayerId = null;
         this.players = {}; // { id: { x, y, angle, color, ... }, ... } - состояние от сервера
         this.playerEntities = {}; // Локальные сущности для рендеринга игроков
+        this.bulletEntities = {}; // <-- Локальные сущности пуль
 
         // Zoom properties
         this.zoom = 1.0;
@@ -105,7 +107,7 @@ class Game {
         });
 
         this.socket.on('gameStateUpdate', (gameState) => {
-            // Обновляем состояние игроков из gameState.players
+            // Обновляем состояние игроков
             if (gameState.players) {
                 gameState.players.forEach(serverPlayer => {
                     if (this.players[serverPlayer.id]) {
@@ -116,7 +118,10 @@ class Game {
                         this.players[serverPlayer.id] = serverPlayer;
                     }
                 });
-                // TODO: Обработать gameState.bullets для рендеринга серверных пуль
+            }
+            // Обновляем пули
+            if (gameState.bullets) {
+                this.syncBulletEntities(gameState.bullets);
             }
              this.syncPlayerEntities(); // Обновляем локальные сущности
         });
@@ -134,20 +139,35 @@ class Game {
          // Создаем/обновляем сущности для текущих игроков
         for (const serverId in this.players) {
              const serverData = this.players[serverId];
+             const isSprintingFromServer = serverData.isSprinting || false;
+
              if (!this.playerEntities[serverId]) {
                  // Создаем новую сущность Player 
                  const playerEntity = new Player(serverData.x, serverData.y); 
                  playerEntity.id = serverId; 
                  playerEntity.color = serverData.color; 
-                 playerEntity.currentHealth = serverData.health !== undefined ? serverData.health : playerEntity.maxHealth; // Используем здоровье с сервера, если есть
-                 playerEntity.ammo = serverData.ammo !== undefined ? serverData.ammo : playerEntity.ammo; // Используем патроны с сервера, если есть
+                 playerEntity.currentHealth = serverData.health !== undefined ? serverData.health : playerEntity.maxHealth;
+                 playerEntity.ammo = serverData.ammo !== undefined ? serverData.ammo : playerEntity.ammo; 
+                 playerEntity.isSprinting = isSprintingFromServer; // Сохраняем флаг спринта
+
+                 // Привязываем обработчик кругов ВСЕМ игрокам
+                 playerEntity.onSpeedCircle = (x, y) => {
+                     this.gameEngine.addEffect(new SpeedCircle(x, y));
+                 };
                  
                  if (serverId === this.myPlayerId) {
-                     playerEntity.isSelf = true; // Помечаем нашего игрока
-                     // НЕ отключаем update для своего игрока
+                     playerEntity.isSelf = true; 
+                     // Локальный игрок использует свою логику tryGenerateSpeedCircle из Player.js
                  } else {
                      playerEntity.isSelf = false;
                      playerEntity.update = () => {}; // Отключаем update для других
+                     playerEntity.targetX = serverData.x;
+                     playerEntity.targetY = serverData.y;
+                     playerEntity.targetAngle = serverData.angle;
+                     playerEntity.angle = serverData.angle; 
+                     // Добавляем свойства для кулдауна эффектов скорости удаленного игрока
+                     playerEntity.lastSpeedCircleTime = 0; 
+                     playerEntity.speedCircleCooldown = 200; // Можно настроить (ms)
                  }
                  this.playerEntities[serverId] = playerEntity;
                  this.gameEngine.addEntity(playerEntity);
@@ -155,22 +175,21 @@ class Game {
              } else {
                  // Обновляем существующую сущность
                  const localEntity = this.playerEntities[serverId];
+                 localEntity.isSprinting = isSprintingFromServer; // Обновляем флаг спринта
+
                  if (serverId !== this.myPlayerId) {
-                     // Прямое присваивание для других игроков (позже - интерполяция)
-                     localEntity.x = serverData.x;
-                     localEntity.y = serverData.y;
-                     localEntity.angle = serverData.angle;
+                     // Обновляем цель для интерполяции
+                     localEntity.targetX = serverData.x;
+                     localEntity.targetY = serverData.y;
+                     localEntity.targetAngle = serverData.angle;
                  } else {
-                     // Для нашего игрока - обновляем X, Y от сервера (авторитетно)
-                     // Угол обновляется локально в update
+                     // Обновляем нашего игрока
                      localEntity.x = serverData.x;
                      localEntity.y = serverData.y;
-                     // Можно добавить коррекцию локального угла, если он сильно разошелся с серверным
-                     // localEntity.angle = serverData.angle; 
                  }
                  localEntity.color = serverData.color; 
-                 localEntity.currentHealth = serverData.health !== undefined ? serverData.health : localEntity.currentHealth; // Обновляем здоровье
-                 localEntity.ammo = serverData.ammo !== undefined ? serverData.ammo : localEntity.ammo; // Обновляем патроны
+                 localEntity.currentHealth = serverData.health !== undefined ? serverData.health : localEntity.currentHealth; 
+                 localEntity.ammo = serverData.ammo !== undefined ? serverData.ammo : localEntity.ammo; 
              }
          }
          // Убедимся, что ссылка this.player указывает на нашу сущность
@@ -185,6 +204,37 @@ class Game {
          } else {
              this.player = null; // Если нашей сущности еще нет
          }
+    }
+
+    // --- Синхронизация пуль --- 
+    syncBulletEntities(serverBullets) {
+        const serverBulletIds = new Set(serverBullets.map(b => b.id));
+
+        // 1. Удаляем локальные пули, которых больше нет на сервере
+        for (const localId in this.bulletEntities) {
+            if (!serverBulletIds.has(parseInt(localId))) { // ID пули - число
+                this.gameEngine.removeBullet(this.bulletEntities[localId]); // Нужен метод в GameEngine
+                delete this.bulletEntities[localId];
+            }
+        }
+
+        // 2. Создаем/обновляем локальные пули
+        serverBullets.forEach(serverBullet => {
+            if (!this.bulletEntities[serverBullet.id]) {
+                // Создаем новую сущность Bullet
+                const bulletEntity = new Bullet(serverBullet.x, serverBullet.y);
+                // Можно добавить ownerId, если понадобится
+                // bulletEntity.ownerId = serverBullet.ownerId; 
+                this.bulletEntities[serverBullet.id] = bulletEntity;
+                this.gameEngine.addBullet(bulletEntity); // Добавляем в движок для рендеринга
+            } else {
+                // Обновляем существующую (пока напрямую, позже можно интерполировать)
+                const localBullet = this.bulletEntities[serverBullet.id];
+                localBullet.x = serverBullet.x;
+                localBullet.y = serverBullet.y;
+                // Угол/скорость не обновляем, т.к. сервер их не шлет
+            }
+        });
     }
 
     initGame() {
@@ -204,12 +254,45 @@ class Game {
         this.fogCanvas.height = this.canvas.height;
     }
 
+    // Новый метод для интерполяции сущностей (вызывается в gameLoop)
+    interpolateEntities(interpolationFactor = 0.15) {
+        const now = performance.now(); // Получаем текущее время один раз
+        for (const id in this.playerEntities) {
+            const entity = this.playerEntities[id];
+            if (!entity.isSelf) { // Интерполируем и генерируем эффекты только для других игроков
+                if (entity.targetX !== undefined) {
+                    // Интерполяция X, Y, Angle (как и раньше)
+                    entity.x += (entity.targetX - entity.x) * interpolationFactor;
+                    entity.y += (entity.targetY - entity.y) * interpolationFactor;
+                    let angleDiff = entity.targetAngle - entity.angle;
+                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                    entity.angle += angleDiff * interpolationFactor;
+                    while (entity.angle > Math.PI) entity.angle -= Math.PI * 2;
+                    while (entity.angle < -Math.PI) entity.angle += Math.PI * 2;
+                }
+
+                // --- Генерация кругов скорости для удаленных игроков --- 
+                if (entity.isSprinting && entity.onSpeedCircle) { // Если игрок спринтует и есть обработчик
+                    // Логика tryGenerateSpeedCircle прямо здесь
+                    if (now - entity.lastSpeedCircleTime > entity.speedCircleCooldown) {
+                        entity.lastSpeedCircleTime = now;
+                        entity.onSpeedCircle(entity.x, entity.y); // Вызываем обработчик
+                    }
+                }
+            }
+        }
+    }
+
     gameLoop(timestamp) {
         const deltaTime = (timestamp - this.lastTime) || 0; 
         this.lastTime = timestamp;
 
         // Update game state and get input
         const input = this.update(deltaTime);
+
+        // Interpolate other players' positions
+        this.interpolateEntities(); 
         
         // Render game, passing the input
         this.render(input); 
@@ -276,8 +359,8 @@ class Game {
         // --- Отправляем ввод на сервер --- 
         const inputToSend = {
             keys: input.keys,
-            angle: this.player.angle // Отправляем актуальный угол
-            // isShiftDown: input.isShiftDown // Можно добавить, если нужно серверу
+            angle: this.player.angle, // Отправляем актуальный угол
+            isShiftDown: input.isShiftDown // <-- Добавляем статус Shift
         };
         this.socket.emit('playerInput', inputToSend);
 
@@ -330,7 +413,23 @@ class Game {
         this.ctx.scale(this.zoom, this.zoom);
         // Рендерим все сущности из gameEngine (игроки, стены)
         this.gameEngine.render(); 
-        this.ctx.restore(); 
+        
+        // --- Render UI (Ammo Count) - ВНУТРИ МАСШТАБИРУЕМОГО КОНТЕКСТА --- 
+        if (this.player) { 
+            const ammoCount = this.player.ammo;
+            const fontSize = 14; // Фиксированный размер шрифта
+            
+            this.ctx.save(); // Дополнительный save/restore для текста
+            this.ctx.font = `bold ${fontSize}px Arial`;
+            this.ctx.fillStyle = 'white'; // Белый цвет без тени
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'middle';
+            // Рисуем в мировых координатах игрока
+            this.ctx.fillText(ammoCount.toString(), this.player.x, this.player.y);
+            this.ctx.restore(); // Восстанавливаем состояние после текста
+        }
+
+        this.ctx.restore(); // <-- Конец блока мира
         
         // --- Render Fog of War (используем this.player) --- 
         this.fogCtx.clearRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
@@ -394,10 +493,9 @@ class Game {
             if (effect.render) { effect.render(this.ctx); }
         });
         this.ctx.restore(); 
-        // --- End World Effects ---
 
-        // --- Render Custom Crosshair ---
-        if (input.rawMouseX !== undefined && input.rawMouseY !== undefined) {
+        // --- Render Crosshair (используем input.mouse, но в экранных координатах) ---
+        if (input && input.rawMouseX !== undefined) {
             const crosshairRadius = this.currentCrosshairRadius; 
             const scaledRadius = crosshairRadius * this.zoom; 
             this.ctx.strokeStyle = '#ffffff'; 

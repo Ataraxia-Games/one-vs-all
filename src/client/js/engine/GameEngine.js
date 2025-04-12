@@ -25,6 +25,11 @@ export class GameEngine {
         this.effects.push(effect);
     }
 
+    // Метод для удаления конкретной пули
+    removeBullet(bulletToRemove) {
+        this.bullets = this.bullets.filter(bullet => bullet !== bulletToRemove);
+    }
+
     removeEntity(entity) {
         const index = this.entities.indexOf(entity);
         if (index !== -1) {
