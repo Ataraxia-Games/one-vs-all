@@ -21,6 +21,7 @@ export class GameEngine {
     }
 
     addEffect(effect) {
+        // console.log("Adding effect:", effect.constructor.name); // DEBUG
         this.effects.push(effect);
     }
 
@@ -48,14 +49,28 @@ export class GameEngine {
     }
 
     update(deltaTime, input) {
-        // Pass the list of walls and the full input object to player update
+        const gameApi = { addBullet: (b) => this.addBullet(b) }; 
+        let player = null; // Найдем игрока
+
+        // Первый проход - обновить игрока и найти его
         this.entities.forEach(entity => {
-            if (entity.update) {
-                if (entity.constructor.name === 'Player') {
+            if (entity.constructor.name === 'Player') {
+                player = entity; // Сохраняем ссылку на игрока
+                if (entity.update) {
                     entity.update(deltaTime, input, this.walls);
-                } else {
-                    // Pass full input to other entities too, if they need it
-                    entity.update(deltaTime, input);
+                }
+            }
+        });
+
+        // Второй проход - обновить ботов и другие сущности
+        this.entities.forEach(entity => {
+            if (entity.constructor.name === 'Bot') {
+                if (entity.update && player) { // Передаем игрока боту
+                    entity.update(deltaTime, this.walls, gameApi, player);
+                }
+            } else if (entity.constructor.name !== 'Player') { // Обновляем все, кроме игрока (уже обновлен)
+                if (entity.update) {
+                    entity.update(deltaTime, input); 
                 }
             }
         });
@@ -64,6 +79,27 @@ export class GameEngine {
         this.bullets.forEach(bullet => {
             bullet.update(deltaTime, this.walls);
         });
+
+        // --- Проверка столкновений Пуля-Игрок ---
+        if (player) { // Если игрок существует
+             // Фильтруем пули: проверяем столкновение и наносим урон
+            this.bullets = this.bullets.filter(bullet => {
+                if (!bullet.isActive) return false; // Пропускаем уже неактивные
+
+                const dx = bullet.x - player.x;
+                const dy = bullet.y - player.y;
+                const distSq = dx * dx + dy * dy;
+                
+                // Простое столкновение кругов
+                if (distSq < (bullet.radius + player.radius) * (bullet.radius + player.radius)) {
+                    player.takeDamage(10); // Пример: каждая пуля наносит 10 урона
+                    bullet.isActive = false; // Деактивируем пулю при попадании
+                    return false; // Удаляем пулю из массива
+                }
+                return true; // Оставляем пулю, если не попала
+            });
+        }
+        // --- Конец проверки Пуля-Игрок ---
 
         // Обновляем эффекты
         this.effects.forEach(effect => {

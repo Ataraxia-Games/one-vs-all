@@ -5,6 +5,7 @@ import { MapGenerator } from './entities/MapGenerator.js';
 import { InputHandler } from './input/InputHandler.js';
 import { intersectSegments } from './utils/geometry.js'; // Импортируем утилиту
 import { SpeedCircle } from './entities/SpeedCircle.js';
+import { Bot } from './entities/Bot.js'; // Импортируем Bot
 
 class Game {
     constructor() {
@@ -56,7 +57,6 @@ class Game {
 
     initGame() {
         this.player = new Player(this.worldWidth / 2, this.worldHeight / 2);
-        // Привязываем обработчик для создания кругов
         this.player.onSpeedCircle = (x, y) => {
             this.gameEngine.addEffect(new SpeedCircle(x, y));
         };
@@ -70,6 +70,22 @@ class Game {
         boundaryWalls.forEach(wall => {
             this.gameEngine.addEntity(wall); // Add Wall instance directly
         });
+
+        // --- Создаем ботов ---
+        const numBots = 5;
+        const padding = 200; // Отступ от краев для спавна
+        for (let i = 0; i < numBots; i++) {
+            const botX = padding + Math.random() * (this.worldWidth - 2 * padding);
+            const botY = padding + Math.random() * (this.worldHeight - 2 * padding);
+            const bot = new Bot(botX, botY);
+            // Привязываем обработчик для создания кругов (как у игрока)
+            bot.onSpeedCircle = (x, y) => {
+                // console.log(`Bot ${i} emitted speed circle at ${x.toFixed(0)}, ${y.toFixed(0)}`); // DEBUG
+                this.gameEngine.addEffect(new SpeedCircle(x, y));
+            };
+            this.gameEngine.addEntity(bot);
+        }
+        // --- Конец создания ботов ---
     }
 
     resizeCanvas() {
