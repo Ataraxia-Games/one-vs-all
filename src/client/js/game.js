@@ -14,8 +14,8 @@ class Game {
         this.fogCanvas = document.createElement('canvas');
         this.fogCtx = this.fogCanvas.getContext('2d');
 
-        this.worldWidth = 2000;
-        this.worldHeight = 2000;
+        this.worldWidth = 2000 * 1.3;
+        this.worldHeight = 2000 * 1.3;
 
         this.gameEngine = new GameEngine(this.ctx);
         this.inputHandler = new InputHandler();
@@ -25,6 +25,15 @@ class Game {
         this.minZoom = 0.3;
         this.maxZoom = 2.5;
         this.zoomSpeed = 0.001;
+
+        // FOV properties
+        this.baseWorldViewRadius = 700;
+        this.currentWorldViewRadius = this.baseWorldViewRadius; 
+        this.targetWorldViewRadius = this.baseWorldViewRadius; 
+        this.baseFovAngle = Math.PI / 2; // 90 degrees
+        this.currentFovAngle = this.baseFovAngle;
+        this.targetFovAngle = this.baseFovAngle;
+        this.fovTransitionSpeed = 0.1; 
 
         // Set canvas size (will also resize fogCanvas)
         this.resizeCanvas();
@@ -62,7 +71,7 @@ class Game {
     }
 
     gameLoop(timestamp) {
-        const deltaTime = timestamp - this.lastTime;
+        const deltaTime = (timestamp - this.lastTime) || 0; // Ensure deltaTime is not NaN on first frame
         this.lastTime = timestamp;
 
         // Update game state
@@ -76,27 +85,37 @@ class Game {
     }
 
     update(deltaTime) {
-        const rawInput = this.inputHandler.getInput();
+        const input = this.inputHandler.getInput(); 
 
         // --- Update Zoom ---
-        if (rawInput.wheelDelta !== 0) {
-            const zoomAmount = rawInput.wheelDelta * this.zoomSpeed;
+        if (input.wheelDelta !== 0) {
+            const zoomAmount = input.wheelDelta * this.zoomSpeed;
             this.zoom -= zoomAmount;
-            // Clamp zoom level
             this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom));
         }
 
-        // --- Calculate World Mouse Coordinates (considering camera and zoom) ---
-        // Camera offset calculation (before zoom) - needed for world coords
+        // --- Update Target FOV Radius & Angle based on RMB ---
+        if (input.isRightMouseDown) {
+            this.targetWorldViewRadius = this.baseWorldViewRadius * 1.3; // Increase radius
+            this.targetFovAngle = Math.PI / 3; // Narrow angle to 60 degrees
+        } else {
+            this.targetWorldViewRadius = this.baseWorldViewRadius * 0.8; // Decrease radius
+            this.targetFovAngle = this.baseFovAngle; // Restore base angle (90 degrees)
+        }
+
+        // --- Smoothly Interpolate Current FOV Radius & Angle ---
+        this.currentWorldViewRadius += (this.targetWorldViewRadius - this.currentWorldViewRadius) * this.fovTransitionSpeed;
+        this.currentFovAngle += (this.targetFovAngle - this.currentFovAngle) * this.fovTransitionSpeed;
+
+        // --- Calculate World Mouse Coordinates ---
         const cameraX = this.canvas.width / 2 - this.player.x * this.zoom;
         const cameraY = this.canvas.height / 2 - this.player.y * this.zoom;
-        
-        const worldMouseX = (rawInput.rawMouseX - cameraX) / this.zoom;
-        const worldMouseY = (rawInput.rawMouseY - cameraY) / this.zoom;
+        const worldMouseX = (input.rawMouseX - cameraX) / this.zoom;
+        const worldMouseY = (input.rawMouseY - cameraY) / this.zoom;
         
         // Prepare input object for game engine
         const inputForEngine = {
-            keys: rawInput.keys,
+            keys: input.keys,
             mouse: { x: worldMouseX, y: worldMouseY } 
         };
 
@@ -126,10 +145,10 @@ class Game {
         const playerScreenX = this.fogCanvas.width / 2;
         const playerScreenY = this.fogCanvas.height / 2;
 
-        // Raycasting parameters
-        const numRays = 120; // Увеличено количество лучей (было 60)
-        const fovAngle = Math.PI / 2; // 90 degrees FOV
-        const worldViewRadius = 500; // Максимальная дальность луча в мире
+        // Raycasting parameters - use current interpolated values
+        const numRays = 120; 
+        const fovAngle = this.currentFovAngle; // Используем текущий угол!
+        const worldViewRadius = this.currentWorldViewRadius; 
         const angleStep = fovAngle / numRays;
         const startAngle = this.player.angle - fovAngle / 2;
 
@@ -213,6 +232,22 @@ class Game {
         // Рисуем результат поверх мира
         this.ctx.drawImage(this.fogCanvas, 0, 0);
         // --- End Fog of War ---
+
+        // --- Render Custom Crosshair ---
+        const mouseInput = this.inputHandler.getInput(); // Get latest raw mouse coords
+        if (mouseInput.rawMouseX !== undefined && mouseInput.rawMouseY !== undefined) {
+            const crosshairRadius = 10; // Базовый радиус прицела
+            // Масштабируем радиус прицела вместе с зумом мира для консистентности
+            const scaledRadius = crosshairRadius * this.zoom; // Вариант 1: Масштабируется с миром
+            //const scaledRadius = crosshairRadius; // Вариант 2: Фиксированный размер на экране
+
+            this.ctx.strokeStyle = '#ffffff'; // Белый цвет
+            this.ctx.lineWidth = 1; // Толщина 1 пиксель
+            this.ctx.beginPath();
+            this.ctx.arc(mouseInput.rawMouseX, mouseInput.rawMouseY, scaledRadius, 0, Math.PI * 2);
+            this.ctx.stroke();
+        }
+        // --- End Custom Crosshair ---
     }
 }
 
