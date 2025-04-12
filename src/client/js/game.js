@@ -1,11 +1,12 @@
 import { GameEngine } from './engine/GameEngine.js';
 import { Player } from './entities/Player.js';
 import { Wall } from './entities/Wall.js';
-import { MapGenerator } from './entities/MapGenerator.js';
 import { InputHandler } from './input/InputHandler.js';
 import { intersectSegments } from './utils/geometry.js'; // Импортируем утилиту
 import { SpeedCircle } from './entities/SpeedCircle.js';
-import { Bot } from './entities/Bot.js'; // Импортируем Bot
+// Socket.io клиент
+// Убедитесь, что библиотека socket.io подключена в index.html
+// <script src="/socket.io/socket.io.js"></script>
 
 class Game {
     constructor() {
@@ -22,6 +23,12 @@ class Game {
         this.gameEngine = new GameEngine(this.ctx);
         this.inputHandler = new InputHandler();
         
+        // --- Сетевое состояние --- 
+        this.socket = io(); // Подключаемся к серверу
+        this.myPlayerId = null;
+        this.players = {}; // { id: { x, y, angle, color, ... }, ... } - состояние от сервера
+        this.playerEntities = {}; // Локальные сущности для рендеринга игроков
+
         // Zoom properties
         this.zoom = 1.0;
         this.minZoom = 0.3;
@@ -43,49 +50,150 @@ class Game {
         this.currentCrosshairRadius = this.baseCrosshairRadius;
         this.crosshairTransitionSpeed = 0.15; // Скорость изменения прицела
 
-        // Set canvas size (will also resize fogCanvas)
+        this.setupSocketListeners();
+        this.initGame();
         this.resizeCanvas();
         window.addEventListener('resize', () => this.resizeCanvas());
-        
-        // Initialize game objects
-        this.initGame();
-        
-        // Start game loop
         this.lastTime = 0;
-        this.gameLoop(0);
+        requestAnimationFrame((time) => this.gameLoop(time));
+    }
+
+    setupSocketListeners() {
+        this.socket.on('connect', () => {
+            console.log('Connected to server with ID:', this.socket.id);
+        });
+
+        this.socket.on('init', (data) => {
+            console.log('Initialization data received:', data);
+            this.myPlayerId = data.id;
+            this.players = data.players;
+            // Получаем стены от сервера
+            this.gameEngine.clearWalls(); // Очищаем старые стены (на всякий случай)
+            if (data.walls && Array.isArray(data.walls)) {
+                data.walls.forEach(wallData => {
+                    // Создаем сущность Wall на основе данных с сервера
+                    const wall = new Wall(
+                        wallData.x,
+                        wallData.y,
+                        wallData.length,
+                        wallData.angle,
+                        wallData.color // Используем цвет с сервера
+                        // Ширина стены wallData.width теперь устанавливается в конструкторе Wall по умолчанию
+                    );
+                    this.gameEngine.addEntity(wall); 
+                });
+                console.log(`Added ${data.walls.length} walls from server.`);
+            } else {
+                console.warn("No walls data received from server or data is invalid.");
+            }
+            this.syncPlayerEntities(); // Синхронизируем игроков после получения начального состояния
+        });
+
+        this.socket.on('playerConnected', (playerData) => {
+            console.log('Player connected:', playerData.id);
+            this.players[playerData.id] = playerData;
+            this.syncPlayerEntities(); 
+        });
+
+        this.socket.on('playerDisconnected', (playerId) => {
+            console.log('Player disconnected:', playerId);
+            delete this.players[playerId];
+             if (this.playerEntities[playerId]) {
+                 this.gameEngine.removeEntity(this.playerEntities[playerId]);
+                 delete this.playerEntities[playerId];
+            }
+        });
+
+        this.socket.on('gameStateUpdate', (gameState) => {
+            // Обновляем состояние игроков из gameState.players
+            if (gameState.players) {
+                gameState.players.forEach(serverPlayer => {
+                    if (this.players[serverPlayer.id]) {
+                        // Просто копируем данные с сервера
+                        Object.assign(this.players[serverPlayer.id], serverPlayer);
+                    } else {
+                        // Игрок появился между init и первым апдейтом
+                        this.players[serverPlayer.id] = serverPlayer;
+                    }
+                });
+                // TODO: Обработать gameState.bullets для рендеринга серверных пуль
+            }
+             this.syncPlayerEntities(); // Обновляем локальные сущности
+        });
+    }
+
+    // Синхронизирует локальные сущности с серверным состоянием players
+    syncPlayerEntities() {
+         // Удаляем сущности для отключившихся игроков
+        for (const localId in this.playerEntities) {
+            if (!this.players[localId]) {
+                this.gameEngine.removeEntity(this.playerEntities[localId]);
+                delete this.playerEntities[localId];
+            }
+        }
+         // Создаем/обновляем сущности для текущих игроков
+        for (const serverId in this.players) {
+             const serverData = this.players[serverId];
+             if (!this.playerEntities[serverId]) {
+                 // Создаем новую сущность Player 
+                 const playerEntity = new Player(serverData.x, serverData.y); 
+                 playerEntity.id = serverId; 
+                 playerEntity.color = serverData.color; 
+                 playerEntity.currentHealth = serverData.health !== undefined ? serverData.health : playerEntity.maxHealth; // Используем здоровье с сервера, если есть
+                 playerEntity.ammo = serverData.ammo !== undefined ? serverData.ammo : playerEntity.ammo; // Используем патроны с сервера, если есть
+                 
+                 if (serverId === this.myPlayerId) {
+                     playerEntity.isSelf = true; // Помечаем нашего игрока
+                     // НЕ отключаем update для своего игрока
+                 } else {
+                     playerEntity.isSelf = false;
+                     playerEntity.update = () => {}; // Отключаем update для других
+                 }
+                 this.playerEntities[serverId] = playerEntity;
+                 this.gameEngine.addEntity(playerEntity);
+                 console.log(`Created entity for ${serverId}`);
+             } else {
+                 // Обновляем существующую сущность
+                 const localEntity = this.playerEntities[serverId];
+                 if (serverId !== this.myPlayerId) {
+                     // Прямое присваивание для других игроков (позже - интерполяция)
+                     localEntity.x = serverData.x;
+                     localEntity.y = serverData.y;
+                     localEntity.angle = serverData.angle;
+                 } else {
+                     // Для нашего игрока - обновляем X, Y от сервера (авторитетно)
+                     // Угол обновляется локально в update
+                     localEntity.x = serverData.x;
+                     localEntity.y = serverData.y;
+                     // Можно добавить коррекцию локального угла, если он сильно разошелся с серверным
+                     // localEntity.angle = serverData.angle; 
+                 }
+                 localEntity.color = serverData.color; 
+                 localEntity.currentHealth = serverData.health !== undefined ? serverData.health : localEntity.currentHealth; // Обновляем здоровье
+                 localEntity.ammo = serverData.ammo !== undefined ? serverData.ammo : localEntity.ammo; // Обновляем патроны
+             }
+         }
+         // Убедимся, что ссылка this.player указывает на нашу сущность
+         if (this.myPlayerId && this.playerEntities[this.myPlayerId]) {
+             this.player = this.playerEntities[this.myPlayerId];
+              // Привязываем обработчик кругов здесь, после создания сущности
+             if (!this.player.onSpeedCircle) { // Если еще не привязан
+                this.player.onSpeedCircle = (x, y) => {
+                    this.gameEngine.addEffect(new SpeedCircle(x, y));
+                };
+             }
+         } else {
+             this.player = null; // Если нашей сущности еще нет
+         }
     }
 
     initGame() {
-        this.player = new Player(this.worldWidth / 2, this.worldHeight / 2);
-        this.player.onSpeedCircle = (x, y) => {
-            this.gameEngine.addEffect(new SpeedCircle(x, y));
-        };
-        this.gameEngine.addEntity(this.player);
-
-        // Generate boundary walls for the world
-        const mapGenerator = new MapGenerator(this.worldWidth, this.worldHeight);
-        const boundaryWalls = mapGenerator.getWalls(); // Now returns Wall instances
-
-        // Add boundary walls to game engine
-        boundaryWalls.forEach(wall => {
-            this.gameEngine.addEntity(wall); // Add Wall instance directly
-        });
-
-        // --- Создаем ботов ---
-        const numBots = 5;
-        const padding = 200; // Отступ от краев для спавна
-        for (let i = 0; i < numBots; i++) {
-            const botX = padding + Math.random() * (this.worldWidth - 2 * padding);
-            const botY = padding + Math.random() * (this.worldHeight - 2 * padding);
-            const bot = new Bot(botX, botY);
-            // Привязываем обработчик для создания кругов (как у игрока)
-            bot.onSpeedCircle = (x, y) => {
-                // console.log(`Bot ${i} emitted speed circle at ${x.toFixed(0)}, ${y.toFixed(0)}`); // DEBUG
-                this.gameEngine.addEffect(new SpeedCircle(x, y));
-            };
-            this.gameEngine.addEntity(bot);
-        }
-        // --- Конец создания ботов ---
+        // НЕ создаем игрока здесь, ждем 'init' от сервера
+        console.log("Initializing game locally...");
+        // ГЕНЕРАЦИЯ СТЕН ПЕРЕНЕСЕНА: теперь стены приходят от сервера в 'init'
+        // const mapGenerator = new MapGenerator(this.worldWidth, this.worldHeight);
+        // const boundaryWalls = mapGenerator.getWalls();
+        // boundaryWalls.forEach(wall => { this.gameEngine.addEntity(wall); });
     }
 
     resizeCanvas() {
@@ -110,12 +218,13 @@ class Game {
     }
 
     update(deltaTime) {
+        if (!this.myPlayerId || !this.player) return; // Ничего не делаем, пока не инициализированы
+
         const input = this.inputHandler.getInput(); 
 
-        // --- Update Zoom ---
+        // --- Обновляем Zoom, FOV, Crosshair (локально) ---
         if (input.wheelDelta !== 0) {
-            const zoomAmount = input.wheelDelta * this.zoomSpeed;
-            this.zoom -= zoomAmount;
+            this.zoom -= input.wheelDelta * this.zoomSpeed;
             this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom));
         }
 
@@ -123,9 +232,11 @@ class Game {
         if (input.isRightMouseDown) {
             this.targetWorldViewRadius = this.baseWorldViewRadius * 1.3; // Increase radius
             this.targetFovAngle = Math.PI / 3; // Narrow angle to 60 degrees
+            this.targetCrosshairRadius = this.baseCrosshairRadius / 2; 
         } else {
             this.targetWorldViewRadius = this.baseWorldViewRadius * 0.8; // Decrease radius
             this.targetFovAngle = this.baseFovAngle; // Restore base angle (90 degrees)
+            this.targetCrosshairRadius = this.baseCrosshairRadius; 
         }
 
         // --- Smoothly Interpolate Current FOV Radius & Angle ---
@@ -133,18 +244,7 @@ class Game {
         this.currentFovAngle += (this.targetFovAngle - this.currentFovAngle) * this.fovTransitionSpeed;
 
         // --- Update Target & Interpolate Crosshair Radius ---
-        if (input.isRightMouseDown) {
-            this.targetCrosshairRadius = this.baseCrosshairRadius / 2; 
-        } else {
-            this.targetCrosshairRadius = this.baseCrosshairRadius; 
-        }
-        const prevCrosshairRadius = this.currentCrosshairRadius;
         this.currentCrosshairRadius += (this.targetCrosshairRadius - this.currentCrosshairRadius) * this.crosshairTransitionSpeed;
-        // --- DEBUG LOG --- 
-        // if (Math.abs(prevCrosshairRadius - this.currentCrosshairRadius) > 0.1) {
-        //     console.log(`RMB: ${input.isRightMouseDown}, TargetR: ${this.targetCrosshairRadius.toFixed(1)}, CurrentR: ${this.currentCrosshairRadius.toFixed(1)}`);
-        // }
-        // --- END DEBUG LOG ---
 
         // --- Calculate World Mouse Coordinates ---
         const cameraX = this.canvas.width / 2 - this.player.x * this.zoom;
@@ -155,186 +255,145 @@ class Game {
         // Add calculated world mouse coordinates to the main input object
         input.mouse = { x: worldMouseX, y: worldMouseY }; 
 
-        // Pass the FULL input object to the engine
-        this.gameEngine.update(deltaTime, input);
+        // --- Обновление своего игрока (только угол и локальные эффекты/события) ---
+        if (worldMouseX !== undefined && worldMouseY !== undefined) {
+            const aimDx = worldMouseX - this.player.x;
+            const aimDy = worldMouseY - this.player.y;
+            this.player.angle = Math.atan2(aimDy, aimDx);
+        }
+        
+        // Вызываем генерацию кругов (если нужно)
+        // Локальное движение (предсказание) пока не реализуем, позиция придет с сервера
+        // this.player.update(deltaTime, input, this.gameEngine.walls); // НЕ вызываем полный update
+         if (input.isShiftDown && (input.keys.w || input.keys.a || input.keys.s || input.keys.d)) {
+             // Вызов tryGenerateSpeedCircle перенесен в Player.update 
+             // this.player.tryGenerateSpeedCircle();
+         }
 
-        // --- Handle Shooting Input ---
+        // Обновляем локального игрока (включая движение для предсказания)
+        this.player.update(deltaTime, input, this.gameEngine.walls);
+
+        // --- Отправляем ввод на сервер --- 
+        const inputToSend = {
+            keys: input.keys,
+            angle: this.player.angle // Отправляем актуальный угол
+            // isShiftDown: input.isShiftDown // Можно добавить, если нужно серверу
+        };
+        this.socket.emit('playerInput', inputToSend);
+
+        // --- Обновляем только локальные эффекты и пули (если они создаются локально) ---
+        // Пули теперь на сервере, так что gameEngine.update не нужен для них
+        // this.gameEngine.update(deltaTime, input); // Вызов update у сущностей больше не нужен здесь
+        this.gameEngine.effects.forEach(effect => effect.update(deltaTime));
+        this.gameEngine.cleanupEffects();
+        
+        // --- Стрельба (отправка события на сервер) ---
         if (input.isLeftMouseClick) {
-            const newBullets = this.player.shoot();
-            if (newBullets.length > 0) {
-                newBullets.forEach(bullet => this.gameEngine.addBullet(bullet));
-            }
+            // Отправляем событие выстрела, сервер создаст пули
+            this.socket.emit('playerShoot'); 
+            // const newBullets = this.player.shoot(); // Не создаем пули локально
+            // if (newBullets.length > 0) {
+            //     newBullets.forEach(bullet => this.gameEngine.addBullet(bullet));
+            // }
         }
 
-        // Return the input object for render method
-        return input;
+        // Вызываем локальный update игрока (для угла и эффектов)
+        if (this.player) {
+            this.player.update(deltaTime, input, this.gameEngine.walls); 
+        }
+
+        return input; // Возвращаем для render
     }
 
     render(input) {
-        // --- Calculate Background Color based on Health ---
-        let backgroundColor = 'rgb(78, 87, 40)'; // Default/fallback
-        if (this.player) { // Убедимся, что игрок создан
-            const healthPercent = Math.max(0, Math.min(1, this.player.currentHealth / this.player.maxHealth));
-            
-            // Цвета: 100% -> Желто-зеленый, 0% -> Красный
-            const fullHealthColor = { r: 78, g: 87, b: 40 }; // Базовый желто-зеленый
-            const zeroHealthColor = { r: 120, g: 0, b: 0 }; // Темно-красный
+        if (!this.myPlayerId || !this.player) return; // Ничего не рендерим, пока не готовы
 
-            // Линейная интерполяция (lerp)
-            const r = Math.round(fullHealthColor.r + (zeroHealthColor.r - fullHealthColor.r) * (1 - healthPercent));
-            const g = Math.round(fullHealthColor.g + (zeroHealthColor.g - fullHealthColor.g) * (1 - healthPercent));
-            const b = Math.round(fullHealthColor.b + (zeroHealthColor.b - fullHealthColor.b) * (1 - healthPercent));
+        // --- Расчет цвета фона (используем this.player) ---
+        let backgroundColor = 'rgb(78, 87, 40)';
+        const healthPercent = Math.max(0, Math.min(1, this.player.currentHealth / this.player.maxHealth));
+        const fullHealthColor = { r: 78, g: 87, b: 40 }; 
+        const zeroHealthColor = { r: 120, g: 0, b: 0 }; 
+        const r = Math.round(fullHealthColor.r + (zeroHealthColor.r - fullHealthColor.r) * (1 - healthPercent));
+        const g = Math.round(fullHealthColor.g + (zeroHealthColor.g - fullHealthColor.g) * (1 - healthPercent));
+        const b = Math.round(fullHealthColor.b + (zeroHealthColor.b - fullHealthColor.b) * (1 - healthPercent));
+        backgroundColor = `rgb(${r}, ${g}, ${b})`;
 
-            backgroundColor = `rgb(${r}, ${g}, ${b})`;
-        }
-
-        // Clear main canvas with calculated background color
+        // Clear main canvas
         this.ctx.fillStyle = backgroundColor;
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // --- Render world with camera offset AND zoom ---
+        // --- Render world (используем this.player для центрирования) ---
         this.ctx.save(); 
         const cameraX = this.canvas.width / 2 - this.player.x * this.zoom;
         const cameraY = this.canvas.height / 2 - this.player.y * this.zoom;
         this.ctx.translate(cameraX, cameraY);
         this.ctx.scale(this.zoom, this.zoom);
-        this.gameEngine.render(); // Render world entities
+        // Рендерим все сущности из gameEngine (игроки, стены)
+        this.gameEngine.render(); 
         this.ctx.restore(); 
-        // --- End world rendering ---
         
-        // --- Render Fog of War using Raycasting --- 
+        // --- Render Fog of War (используем this.player) --- 
         this.fogCtx.clearRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
-        this.fogCtx.fillStyle = 'rgba(0, 0, 0, 1)'; // Solid black fog
+        this.fogCtx.fillStyle = 'rgba(0, 0, 0, 1)';
         this.fogCtx.fillRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
-
         const playerScreenX = this.fogCanvas.width / 2;
         const playerScreenY = this.fogCanvas.height / 2;
-
-        // Raycasting parameters - use current interpolated values
         const numRays = 120; 
-        const fovAngle = this.currentFovAngle; // Используем текущий угол!
+        const fovAngle = this.currentFovAngle; 
         const worldViewRadius = this.currentWorldViewRadius; 
         const angleStep = fovAngle / numRays;
         const startAngle = this.player.angle - fovAngle / 2;
-
-        const visibilityPoints = []; // Точки для полигона видимости (в координатах fogCanvas)
-
+        const visibilityPoints = []; 
         for (let i = 0; i <= numRays; i++) {
             const currentAngle = startAngle + i * angleStep;
-            
-            // Конечная точка луча на максимальной дальности
             const rayEndXWorld = this.player.x + worldViewRadius * Math.cos(currentAngle);
             const rayEndYWorld = this.player.y + worldViewRadius * Math.sin(currentAngle);
-
             let closestHit = null;
             let minHitDistSq = worldViewRadius * worldViewRadius;
-
-            // Проверяем пересечение луча со всеми СТОРОНАМИ всех стен
             for (const wall of this.gameEngine.walls) {
-                // Итерируем по 4 сегментам (сторонам) стены
                 for (let j = 0; j < wall.corners.length; j++) {
                     const corner1 = wall.corners[j];
-                    const corner2 = wall.corners[(j + 1) % wall.corners.length]; // Следующий угол (замыкаем)
-
-                    const hit = intersectSegments(
-                        this.player.x, this.player.y, rayEndXWorld, rayEndYWorld, // Луч
-                        corner1.x, corner1.y, corner2.x, corner2.y // Сегмент стены
-                    );
-
+                    const corner2 = wall.corners[(j + 1) % wall.corners.length];
+                    const hit = intersectSegments(this.player.x, this.player.y, rayEndXWorld, rayEndYWorld, corner1.x, corner1.y, corner2.x, corner2.y );
                     if (hit) {
                         const dx = hit.x - this.player.x;
                         const dy = hit.y - this.player.y;
                         const distSq = dx * dx + dy * dy;
-                        if (distSq < minHitDistSq) {
-                            minHitDistSq = distSq;
-                            closestHit = hit;
-                        }
+                        if (distSq < minHitDistSq) { minHitDistSq = distSq; closestHit = hit; }
                     }
                 }
             }
-
             let finalPointWorldX, finalPointWorldY;
-            if (closestHit) {
-                // Используем точку пересечения
-                finalPointWorldX = closestHit.x;
-                finalPointWorldY = closestHit.y;
-            } else {
-                // Используем конец луча
-                finalPointWorldX = rayEndXWorld;
-                finalPointWorldY = rayEndYWorld;
-            }
-
-            // Преобразуем конечную точку луча в координаты fogCanvas
+            if (closestHit) { finalPointWorldX = closestHit.x; finalPointWorldY = closestHit.y; }
+            else { finalPointWorldX = rayEndXWorld; finalPointWorldY = rayEndYWorld; }
             const finalPointScreenX = playerScreenX + (finalPointWorldX - this.player.x) * this.zoom;
             const finalPointScreenY = playerScreenY + (finalPointWorldY - this.player.y) * this.zoom;
             visibilityPoints.push({ x: finalPointScreenX, y: finalPointScreenY });
         }
-
-        // --- Create visibility polygon and gradient --- 
         if (visibilityPoints.length > 0) {
-            // --- Cutout Main FOV Polygon ---
-            this.fogCtx.beginPath();
-            this.fogCtx.moveTo(playerScreenX, playerScreenY); 
-            visibilityPoints.forEach(p => this.fogCtx.lineTo(p.x, p.y));
-            this.fogCtx.closePath();
-
-            // Main FOV gradient (based on raycast distance)
+            this.fogCtx.beginPath(); this.fogCtx.moveTo(playerScreenX, playerScreenY); visibilityPoints.forEach(p => this.fogCtx.lineTo(p.x, p.y)); this.fogCtx.closePath();
             const screenViewRadius = this.currentWorldViewRadius * this.zoom;
-            const fovGradient = this.fogCtx.createRadialGradient( 
-                playerScreenX, playerScreenY, screenViewRadius * 0.2, 
-                playerScreenX, playerScreenY, screenViewRadius 
-            );
-            fovGradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); 
-            fovGradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); 
-
-            // Apply main FOV cutout
-            this.fogCtx.globalCompositeOperation = 'destination-out';
-            this.fogCtx.fillStyle = fovGradient; 
-            this.fogCtx.fill();
-            // Keep globalCompositeOperation as 'destination-out' for the next step
-
-            // --- Cutout Close-Range Circle ---
-            const closeRadiusWorld = 100; // Увеличено (было 70)
-            const closeRadiusScreen = closeRadiusWorld * this.zoom;
-            
-            // Close-range gradient
-            const closeGradient = this.fogCtx.createRadialGradient(
-                playerScreenX, playerScreenY, 0, // Start fully clear at the center
-                playerScreenX, playerScreenY, closeRadiusScreen // Fade to fully fogged at edge
-            );
-            closeGradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); // Clear fog at center
-            closeGradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); // Keep fog at edge
-            
-            // Draw the circle for close range view
-            this.fogCtx.beginPath();
-            this.fogCtx.arc(playerScreenX, playerScreenY, closeRadiusScreen, 0, Math.PI * 2);
-            this.fogCtx.closePath();
-            
-            // Apply close-range cutout (still using destination-out)
-            this.fogCtx.fillStyle = closeGradient;
-            this.fogCtx.fill();
-
-            // Reset composite operation only after both cutouts are done
+            const fovGradient = this.fogCtx.createRadialGradient( playerScreenX, playerScreenY, screenViewRadius * 0.2, playerScreenX, playerScreenY, screenViewRadius );
+            fovGradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); fovGradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); 
+            this.fogCtx.globalCompositeOperation = 'destination-out'; this.fogCtx.fillStyle = fovGradient; this.fogCtx.fill();
+            const closeRadiusWorld = 140; const closeRadiusScreen = closeRadiusWorld * this.zoom;
+            const closeGradient = this.fogCtx.createRadialGradient(playerScreenX, playerScreenY, 0, playerScreenX, playerScreenY, closeRadiusScreen );
+            closeGradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); closeGradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); 
+            this.fogCtx.beginPath(); this.fogCtx.arc(playerScreenX, playerScreenY, closeRadiusScreen, 0, Math.PI * 2); this.fogCtx.closePath();
+            this.fogCtx.fillStyle = closeGradient; this.fogCtx.fill();
             this.fogCtx.globalCompositeOperation = 'source-over'; 
         }
-
-        // Draw fog canvas
         this.ctx.drawImage(this.fogCanvas, 0, 0);
         // --- End Fog of War ---
 
-        // --- Render World Effects (e.g., speed circles) OVER the fog ---
-        // Apply camera transform again for world-based effects
+        // --- Render World Effects OVER the fog ---
         this.ctx.save();
-        this.ctx.translate(cameraX, cameraY); // Используем те же cameraX, cameraY, что и для мира
+        this.ctx.translate(cameraX, cameraY); 
         this.ctx.scale(this.zoom, this.zoom);
-
         this.gameEngine.effects.forEach(effect => {
-            if (effect.render) { // Проверяем, есть ли метод render
-                effect.render(this.ctx);
-            }
+            if (effect.render) { effect.render(this.ctx); }
         });
-
-        this.ctx.restore(); // Убираем трансформацию камеры для эффектов
+        this.ctx.restore(); 
         // --- End World Effects ---
 
         // --- Render Custom Crosshair ---

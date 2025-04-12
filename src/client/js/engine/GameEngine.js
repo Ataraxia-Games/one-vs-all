@@ -48,6 +48,15 @@ export class GameEngine {
         this.effects = this.effects.filter(effect => effect.isActive);
     }
 
+    // Новый метод для очистки стен
+    clearWalls() {
+        // Удаляем стены из основного массива entities
+        this.entities = this.entities.filter(entity => entity.constructor.name !== 'Wall');
+        // Очищаем специализированный массив walls
+        this.walls = [];
+        console.log("Cleared existing walls."); // Сообщение для отладки
+    }
+
     update(deltaTime, input) {
         const gameApi = { addBullet: (b) => this.addBullet(b) }; 
         let player = null; // Найдем игрока

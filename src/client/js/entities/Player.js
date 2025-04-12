@@ -15,7 +15,7 @@ export class Player {
         // Параметры дробовика
         this.shotgunPellets = 8;
         this.shotgunSpread = Math.PI / 18; // Угол разброса (10 градусов)
-        this.bulletSpeed = 1000;
+        this.bulletSpeed = 600;
         this.bulletLifetime = 500; // ms
 
         // Speed circle properties
@@ -25,84 +25,25 @@ export class Player {
         // Health properties
         this.maxHealth = 100;
         this.currentHealth = this.maxHealth; // Начинаем со 100% здоровья
+        this.id = null; // Будет установлен из Game
+        this.color = '#000'; // Черный цвет по умолчанию (сервер может прислать другой)
     }
 
     update(deltaTime, input, walls) {
-        // Convert deltaTime from ms to seconds for consistent speed calculation
-        const dt = deltaTime / 1000; 
-
-        // Determine current speed based on Shift key
-        const currentSpeed = input.isShiftDown ? this.speed * 1.5 : this.speed; // Ускорение в 1.75 раза
-
-        // Calculate potential movement scaled by time and speed
-        let deltaX = 0;
-        let deltaY = 0;
-        if (input.keys.w) deltaY -= currentSpeed * dt;
-        if (input.keys.s) deltaY += currentSpeed * dt;
-        if (input.keys.a) deltaX -= currentSpeed * dt;
-        if (input.keys.d) deltaX += currentSpeed * dt;
-
-        // Normalize diagonal movement (optional but good practice)
-        if (deltaX !== 0 && deltaY !== 0) {
-            const factor = 1 / Math.sqrt(2);
-            deltaX *= factor;
-            deltaY *= factor;
-        }
-
-        // --- Collision Detection & Resolution (Move then Pushback) ---
-        let tempX = this.x + deltaX;
-        let tempY = this.y + deltaY;
-
-        if (walls) {
-            // Check for collisions at the temporary position
-            // Perform multiple iterations to handle pushing from multiple walls if needed
-            const maxPushIterations = 3; 
-            for (let i = 0; i < maxPushIterations; i++) {
-                let collisionOccurred = false;
-                for (const wall of walls) {
-                    const collisionResult = checkCircleWallCollision(
-                        { x: tempX, y: tempY, radius: this.radius }, 
-                        wall
-                    );
-
-                    if (collisionResult.collided) {
-                        collisionOccurred = true;
-                        // Apply pushback based on overlap and push direction
-                        // Add a small epsilon to avoid getting stuck exactly on the edge
-                        const pushAmount = collisionResult.overlap + 0.01;
-                        tempX += collisionResult.pushX * pushAmount;
-                        tempY += collisionResult.pushY * pushAmount;
-                        // Note: This handles one wall per iteration. 
-                        // Multiple iterations help resolve complex corner cases.
-                    }
-                }
-                if (!collisionOccurred) {
-                    // If no collision in this iteration, position is resolved
-                    break; 
-                }
-            }
-        }
-
-        // Set final position after potential pushbacks
-        this.x = tempX;
-        this.y = tempY;
-        // --- End Collision ---
-
-        // --- DEBUG LOG --- 
-        console.log(`Shift: ${input.isShiftDown}, dX: ${deltaX.toFixed(2)}, dY: ${deltaY.toFixed(2)}`);
-        // --- END DEBUG LOG ---
-
-        // --- Generate Speed Circles if sprinting ---
-        if (input.isShiftDown && (deltaX !== 0 || deltaY !== 0)) {
-            this.tryGenerateSpeedCircle();
-        }
-
-        // Handle rotation (aiming) - relative to current position
-        if (input.mouse.x !== undefined && input.mouse.y !== undefined) {
+        // Обновляем только угол для отзывчивости прицеливания
+        if (input.mouse && input.mouse.x !== undefined && input.mouse.y !== undefined) {
             const aimDx = input.mouse.x - this.x;
             const aimDy = input.mouse.y - this.y;
+            // Угол обновляется локально и отправляется на сервер
             this.angle = Math.atan2(aimDy, aimDx);
         }
+
+        // Генерируем круги локально при намерении двигаться со спринтом
+        if (input.isShiftDown && (input.keys.w || input.keys.a || input.keys.s || input.keys.d)) {
+             this.tryGenerateSpeedCircle();
+         }
+        
+        // Движение и столкновения теперь обрабатываются сервером
     }
 
     // Метод для создания пуль
@@ -134,33 +75,24 @@ export class Player {
     render(ctx) {
         ctx.save();
         ctx.translate(this.x, this.y);
-        ctx.rotate(this.angle);
+        // Вращаем для рендеринга (если нужно, но для круга не обязательно)
+        // ctx.rotate(this.angle); 
 
-        // Draw player body as a black circle
-        ctx.fillStyle = '#000'; // Черный цвет
+        // Draw player body using this.color
+        ctx.fillStyle = this.color; // Используем цвет игрока
         ctx.beginPath();
         ctx.arc(0, 0, this.radius, 0, Math.PI * 2); 
         ctx.fill();
 
-        // --- Remove aiming line --- 
-        /*
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(this.radius, 0); 
-        ctx.strokeStyle = '#f00';
-        ctx.lineWidth = 2; 
-        ctx.stroke();
-        */
-
-        // --- Draw Ammo Count --- 
-        // Rotate context back to draw text upright relative to screen
-        ctx.rotate(-this.angle); 
-        
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.71)'; // Полупрозрачный белый цвет текста
-        ctx.font = 'bold 17px Arial'; // Увеличен размер шрифта (было 10px)
-        ctx.textAlign = 'center'; // Выравнивание по центру
-        ctx.textBaseline = 'middle'; // Выравнивание по вертикали
-        ctx.fillText(this.ammo, 0, 0); // Рисуем текст в центре (0, 0) локальных координат
+        // Draw Ammo Count (если это наш игрок)
+        if (this.isSelf) { // Добавим флаг isSelf? Или проверять по ID
+            // ctx.rotate(-this.angle); // Нужно ли вращать назад? Текст уже не внутри
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.71)'; 
+            ctx.font = 'bold 17px Arial'; 
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(this.ammo, 0, this.radius + 15); // Рисуем под кругом
+        }
 
         ctx.restore();
     }
@@ -180,7 +112,7 @@ export class Player {
     takeDamage(amount) {
         this.currentHealth -= amount;
         this.currentHealth = Math.max(0, this.currentHealth); // Не уходим в минус
-        console.log(`Player took ${amount} damage, health: ${this.currentHealth}/${this.maxHealth}`);
+        console.log(`Player ${this.id} took ${amount} damage, health: ${this.currentHealth}/${this.maxHealth}`);
         // TODO: Добавить эффект получения урона (например, мигание фона)
     }
 } 
