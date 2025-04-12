@@ -155,8 +155,25 @@ class Game {
     }
 
     render(input) {
-        // Clear main canvas
-        this.ctx.fillStyle = 'rgb(78, 87, 40)'; 
+        // --- Calculate Background Color based on Health ---
+        let backgroundColor = 'rgb(78, 87, 40)'; // Default/fallback
+        if (this.player) { // Убедимся, что игрок создан
+            const healthPercent = Math.max(0, Math.min(1, this.player.currentHealth / this.player.maxHealth));
+            
+            // Цвета: 100% -> Желто-зеленый, 0% -> Красный
+            const fullHealthColor = { r: 78, g: 87, b: 40 }; // Базовый желто-зеленый
+            const zeroHealthColor = { r: 120, g: 0, b: 0 }; // Темно-красный
+
+            // Линейная интерполяция (lerp)
+            const r = Math.round(fullHealthColor.r + (zeroHealthColor.r - fullHealthColor.r) * (1 - healthPercent));
+            const g = Math.round(fullHealthColor.g + (zeroHealthColor.g - fullHealthColor.g) * (1 - healthPercent));
+            const b = Math.round(fullHealthColor.b + (zeroHealthColor.b - fullHealthColor.b) * (1 - healthPercent));
+
+            backgroundColor = `rgb(${r}, ${g}, ${b})`;
+        }
+
+        // Clear main canvas with calculated background color
+        this.ctx.fillStyle = backgroundColor;
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
         // --- Render world with camera offset AND zoom ---

@@ -15,12 +15,16 @@ export class Player {
         // Параметры дробовика
         this.shotgunPellets = 8;
         this.shotgunSpread = Math.PI / 18; // Угол разброса (10 градусов)
-        this.bulletSpeed = 600;
+        this.bulletSpeed = 1000;
         this.bulletLifetime = 500; // ms
 
         // Speed circle properties
         this.speedCircleCooldown = 200; // ms между кругами
         this.lastSpeedCircleTime = -Infinity;
+
+        // Health properties
+        this.maxHealth = 100;
+        this.currentHealth = this.maxHealth; // Начинаем со 100% здоровья
     }
 
     update(deltaTime, input, walls) {
