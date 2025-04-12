@@ -3,6 +3,7 @@ import { Player } from './entities/Player.js';
 import { Wall } from './entities/Wall.js';
 import { MapGenerator } from './entities/MapGenerator.js';
 import { InputHandler } from './input/InputHandler.js';
+import { intersectSegments } from './utils/geometry.js'; // Импортируем утилиту
 
 class Game {
     constructor() {
@@ -103,67 +104,113 @@ class Game {
     }
 
     render() {
-        // Clear main canvas with gray background
-        this.ctx.fillStyle = '#1a1a1a'; // Restore background color
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height); // Restore background fill
+        // Clear main canvas
+        this.ctx.fillStyle = '#1a1a1a'; 
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // --- Render world with camera offset AND zoom (Re-enabled) ---
+        // --- Render world with camera offset AND zoom ---
         this.ctx.save(); 
-        // Center camera on player
         const cameraX = this.canvas.width / 2 - this.player.x * this.zoom;
         const cameraY = this.canvas.height / 2 - this.player.y * this.zoom;
         this.ctx.translate(cameraX, cameraY);
-        // Apply zoom
         this.ctx.scale(this.zoom, this.zoom);
-        
-        // Render all entities onto main canvas (now scaled and translated)
-        this.gameEngine.render(); 
+        this.gameEngine.render(); // Render world entities
         this.ctx.restore(); 
         // --- End world rendering ---
         
-
-        // --- Render Fog of War using offscreen canvas --- 
+        // --- Render Fog of War using Raycasting --- 
         this.fogCtx.clearRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
-        this.fogCtx.fillStyle = 'rgba(0, 0, 0, 1)';
+        this.fogCtx.fillStyle = 'rgba(0, 0, 0, 1)'; // Solid black fog
         this.fogCtx.fillRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
 
         const playerScreenX = this.fogCanvas.width / 2;
         const playerScreenY = this.fogCanvas.height / 2;
-        
-        // Define FOV properties in world units
-        const fovAngle = Math.PI / 2; // 90 degrees
-        const worldViewRadius = 500; // Fixed distance in world pixels
 
-        // Calculate screen radius based on world radius and zoom
-        let screenViewRadius = worldViewRadius * this.zoom;
-        screenViewRadius = Math.max(1, screenViewRadius); // Ensure radius is positive
+        // Raycasting parameters
+        const numRays = 120; // Увеличено количество лучей (было 60)
+        const fovAngle = Math.PI / 2; // 90 degrees FOV
+        const worldViewRadius = 500; // Максимальная дальность луча в мире
+        const angleStep = fovAngle / numRays;
+        const startAngle = this.player.angle - fovAngle / 2;
 
-        // Draw the arc using screen radius
-        this.fogCtx.beginPath();
-        this.fogCtx.moveTo(playerScreenX, playerScreenY);
-        this.fogCtx.arc(
-            playerScreenX, playerScreenY, 
-            screenViewRadius, // Use screen radius for drawing
-            this.player.angle - fovAngle / 2, 
-            this.player.angle + fovAngle / 2
-        );
-        this.fogCtx.closePath();
-        
-        // Create radial gradient using screen radius
-        const gradient = this.fogCtx.createRadialGradient(
-            playerScreenX, playerScreenY, screenViewRadius * 0.5, // Inner circle (scaled by zoom)
-            playerScreenX, playerScreenY, screenViewRadius      // Outer circle (scaled by zoom)
-        );
-        gradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); // Opaque alpha at center
-        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); // Transparent alpha at edge
+        const visibilityPoints = []; // Точки для полигона видимости (в координатах fogCanvas)
 
-        // Cutout using destination-out and the gradient
-        this.fogCtx.globalCompositeOperation = 'destination-out';
-        this.fogCtx.fillStyle = gradient;
-        this.fogCtx.fill();
-        this.fogCtx.globalCompositeOperation = 'source-over'; 
+        for (let i = 0; i <= numRays; i++) {
+            const currentAngle = startAngle + i * angleStep;
+            
+            // Конечная точка луча на максимальной дальности
+            const rayEndXWorld = this.player.x + worldViewRadius * Math.cos(currentAngle);
+            const rayEndYWorld = this.player.y + worldViewRadius * Math.sin(currentAngle);
 
-        // Draw the prepared fog canvas over the world
+            let closestHit = null;
+            let minHitDistSq = worldViewRadius * worldViewRadius;
+
+            // Проверяем пересечение луча со всеми СТОРОНАМИ всех стен
+            for (const wall of this.gameEngine.walls) {
+                // Итерируем по 4 сегментам (сторонам) стены
+                for (let j = 0; j < wall.corners.length; j++) {
+                    const corner1 = wall.corners[j];
+                    const corner2 = wall.corners[(j + 1) % wall.corners.length]; // Следующий угол (замыкаем)
+
+                    const hit = intersectSegments(
+                        this.player.x, this.player.y, rayEndXWorld, rayEndYWorld, // Луч
+                        corner1.x, corner1.y, corner2.x, corner2.y // Сегмент стены
+                    );
+
+                    if (hit) {
+                        const dx = hit.x - this.player.x;
+                        const dy = hit.y - this.player.y;
+                        const distSq = dx * dx + dy * dy;
+                        if (distSq < minHitDistSq) {
+                            minHitDistSq = distSq;
+                            closestHit = hit;
+                        }
+                    }
+                }
+            }
+
+            let finalPointWorldX, finalPointWorldY;
+            if (closestHit) {
+                // Используем точку пересечения
+                finalPointWorldX = closestHit.x;
+                finalPointWorldY = closestHit.y;
+            } else {
+                // Используем конец луча
+                finalPointWorldX = rayEndXWorld;
+                finalPointWorldY = rayEndYWorld;
+            }
+
+            // Преобразуем конечную точку луча в координаты fogCanvas
+            const finalPointScreenX = playerScreenX + (finalPointWorldX - this.player.x) * this.zoom;
+            const finalPointScreenY = playerScreenY + (finalPointWorldY - this.player.y) * this.zoom;
+            visibilityPoints.push({ x: finalPointScreenX, y: finalPointScreenY });
+        }
+
+        // Создаем полигон видимости на fogCanvas
+        if (visibilityPoints.length > 0) {
+            this.fogCtx.beginPath();
+            this.fogCtx.moveTo(playerScreenX, playerScreenY); // Начинаем с игрока
+            visibilityPoints.forEach(p => this.fogCtx.lineTo(p.x, p.y));
+            this.fogCtx.closePath();
+
+            // Создаем радиальный градиент для плавного края
+            // Радиус градиента соответствует максимальной дальности лучей на экране
+            const screenViewRadius = worldViewRadius * this.zoom;
+            const gradient = this.fogCtx.createRadialGradient(
+                playerScreenX, playerScreenY, screenViewRadius * 0.2, // Inner circle (почти полностью прозрачный туман)
+                playerScreenX, playerScreenY, screenViewRadius      // Outer circle (полностью непрозрачный туман)
+            );
+            gradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); // Opaque alpha at center (clears fog)
+            gradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); // Transparent alpha at edge (keeps fog)
+
+            // Вырезаем полигон из тумана, используя градиент
+            this.fogCtx.globalCompositeOperation = 'destination-out';
+            this.fogCtx.fillStyle = gradient; // Используем градиент для заливки
+            this.fogCtx.fill();
+            this.fogCtx.globalCompositeOperation = 'source-over'; 
+        }
+
+        // Рисуем результат поверх мира
         this.ctx.drawImage(this.fogCanvas, 0, 0);
         // --- End Fog of War ---
     }
