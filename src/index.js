@@ -92,6 +92,21 @@ function checkCircleWallCollision(circle, wall) {
     return { collided: false };
 }
 
+// --- Утилита: Проверка точки внутри полигона (Ray Casting) ---
+function isPointInsidePolygon(point, polygonVertices) {
+    let x = point.x, y = point.y;
+    let isInside = false;
+    for (let i = 0, j = polygonVertices.length - 1; i < polygonVertices.length; j = i++) {
+        let xi = polygonVertices[i].x, yi = polygonVertices[i].y;
+        let xj = polygonVertices[j].x, yj = polygonVertices[j].y;
+
+        let intersect = ((yi > y) !== (yj > y))
+            && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) isInside = !isInside;
+    }
+    return isInside;
+}
+
 // --- Map Generation (скопировано из client/js/entities/MapGenerator.js) ---
 // Простой класс Wall для MapGenerator'а на сервере
 class ServerMapWall {
@@ -125,6 +140,7 @@ class MapGenerator {
         this.worldWidth = worldWidth;
         this.worldHeight = worldHeight;
         this.walls = [];
+        this.boundaryVertices = []; // <-- Добавляем массив для вершин
         this.generateBoundaryWalls();
         this.generateInnerWalls();
         // Вычисляем углы для всех сгенерированных стен
@@ -140,6 +156,7 @@ class MapGenerator {
         const radius = Math.min(this.worldWidth, this.worldHeight) / 2 * 0.9; 
         const angleStep = (Math.PI * 2) / numVertices;
 
+        this.boundaryVertices = []; // Очищаем/инициализируем массив вершин класса
         const vertices = [];
         for (let i = 0; i < numVertices; i++) {
             const currentAngle = i * angleStep + (Math.random() - 0.5) * angleStep * 0.8;
@@ -147,11 +164,12 @@ class MapGenerator {
             const x = centerX + currentRadius * Math.cos(currentAngle);
             const y = centerY + currentRadius * Math.sin(currentAngle);
             vertices.push({ x, y });
+            this.boundaryVertices.push({ x, y }); // <-- Сохраняем вершину
         }
 
         for (let i = 0; i < numVertices; i++) {
-            const start = vertices[i];
-            const end = vertices[(i + 1) % numVertices]; 
+            const start = this.boundaryVertices[i]; // Используем сохраненные вершины
+            const end = this.boundaryVertices[(i + 1) % numVertices]; 
             const dx = end.x - start.x;
             const dy = end.y - start.y;
             const length = Math.sqrt(dx * dx + dy * dy);
@@ -181,6 +199,10 @@ class MapGenerator {
 
     getWalls() {
         return this.walls;
+    }
+    
+    getBoundaryVertices() { // <-- Новый метод для получения вершин
+        return this.boundaryVertices;
     }
 }
 
@@ -237,22 +259,43 @@ io.on('connection', (socket) => {
         const numPlayersTotal = Object.keys(players).length + 1;
         const initialMaxHealth = isPredator ? calculatePredatorMaxHealth(numPlayersTotal) : hunterBaseHealth;
 
+        // --- Генерация безопасной точки спавна внутри границ карты ---
+        const boundaryVertices = mapGenerator.getBoundaryVertices();
+        let spawnX, spawnY;
+        let attempts = 0;
+        const maxSpawnAttempts = 100; // Предохранитель от бесконечного цикла
+        do {
+            // Генерируем точку с отступом от краев мира
+            spawnX = 100 + Math.random() * (worldWidth - 200);
+            spawnY = 100 + Math.random() * (worldHeight - 200);
+            attempts++;
+            if (attempts > maxSpawnAttempts) {
+                console.warn(`Failed to find valid spawn point after ${maxSpawnAttempts} attempts. Spawning near center.`);
+                spawnX = worldWidth / 2; // Запасной вариант
+                spawnY = worldHeight / 2;
+                break;
+            }
+        } while (!isPointInsidePolygon({ x: spawnX, y: spawnY }, boundaryVertices));
+        console.log(`Spawn point found after ${attempts} attempts: (${spawnX.toFixed(0)}, ${spawnY.toFixed(0)})`);
+        // --- Конец генерации точки спавна ---
+
         // Создаем игрока
         players[socket.id] = {
             id: socket.id,
             name: playerName,
-            isPredator: isPredator, // <-- Сохраняем роль
-            x: worldWidth / 2 + (Math.random() - 0.5) * 100, 
-            y: worldHeight / 2 + (Math.random() - 0.5) * 100,
+            isPredator: isPredator,
+            x: spawnX, // Используем безопасные координаты
+            y: spawnY,
             angle: 0,
             color: '#000000', 
-            maxHealth: initialMaxHealth, // Устанавливаем макс. здоровье
-            health: initialMaxHealth,    // Устанавливаем текущее здоровье
+            maxHealth: initialMaxHealth, 
+            health: initialMaxHealth,    
             ammo: 10,    
-            maxAmmo: 10, // Добавляем поле maxAmmo
-            input: { keys: {}, angle: 0, isShiftDown: false, isAiming: false }, // Добавляем isAiming
+            maxAmmo: 10, 
+            input: { keys: {}, angle: 0, isShiftDown: false, isAiming: false }, 
             lastShotTime: 0, 
-            lastAttackTime: 0 // Для кулдауна атаки Хищника
+            lastAttackTime: 0, // Для кулдауна атаки Хищника
+            lastFakeTrailTime: 0 // Для кулдауна ложного следа Хищника
         };
 
         // Если присоединился ОХОТНИК, обновляем здоровье Хищника
@@ -387,6 +430,24 @@ io.on('connection', (socket) => {
             }
         }
     });
+
+    // --- НОВЫЕ ОБРАБОТЧИКИ ЭФФЕКТОВ ---
+    const effectCooldown = 200; // Кулдаун для ложного следа
+
+    socket.on('predatorUsedFakeTrail', (pos) => {
+        const player = players[socket.id];
+        if (!player || !player.isPredator) return; // Только Хищник
+        if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number') return; // Проверка данных
+        const now = Date.now();
+        if (now - player.lastFakeTrailTime > effectCooldown) { // Используем отдельный кулдаун?
+            player.lastFakeTrailTime = now;
+             // Ограничиваем координаты, чтобы не спамить эффекты за картой?
+            const safeX = Math.max(0, Math.min(worldWidth, pos.x));
+            const safeY = Math.max(0, Math.min(worldHeight, pos.y));
+            io.emit('createEffect', { type: 'speedCircle', x: safeX, y: safeY });
+        }
+    });
+    // --- КОНЕЦ ОБРАБОТЧИКОВ ЭФФЕКТОВ ---
 
     // Обработка отключения
     socket.on('disconnect', () => {

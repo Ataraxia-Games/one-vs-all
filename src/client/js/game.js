@@ -187,6 +187,13 @@ class Game {
             console.warn(`Disconnected from server: ${reason}`);
             this.handleDisconnectionOrDeath("Отключен от сервера");
         });
+
+        // --- НОВЫЙ ОБРАБОТЧИК СОЗДАНИЯ ЭФФЕКТОВ ---
+        this.socket.on('createEffect', (data) => {
+            if (data && data.type === 'speedCircle') {
+                this.gameEngine.addEffect(new SpeedCircle(data.x, data.y));
+            } // Можно добавить другие типы эффектов позже
+        });
     }
 
     // Синхронизирует локальные сущности с серверным состоянием players
@@ -475,13 +482,14 @@ class Game {
             this.predatorAttackCharge = Math.min(1.0, this.predatorAttackCharge);
 
             // --- Способность Хищника "Ложный след" (ПКМ) ---
-            if (input.isRightMouseDown) { // Используем isRightMouseDown для удержания
-                const now = performance.now(); // Время для кулдауна
+            if (input.isRightMouseDown) { 
+                const now = performance.now(); 
                 if (now - this.lastPredatorFakeTrailTime > this.predatorFakeTrailCooldown) {
-                    // Создаем эффект локально. Для видимости у других - нужна сеть.
-                    this.gameEngine.addEffect(new SpeedCircle(input.mouse.x, input.mouse.y)); 
-                    console.log(`Predator used Fake Trail at ${input.mouse.x.toFixed(0)}, ${input.mouse.y.toFixed(0)}`); // Отладка
-                    this.lastPredatorFakeTrailTime = now; // Обновляем время последнего эффекта
+                    // Отправляем событие на сервер вместо локального создания
+                    this.socket.emit('predatorUsedFakeTrail', { x: input.mouse.x, y: input.mouse.y });
+                    // this.gameEngine.addEffect(new SpeedCircle(input.mouse.x, input.mouse.y)); // Старая логика
+                    // console.log(`Predator used Fake Trail ...`); // Удалено
+                    this.lastPredatorFakeTrailTime = now; 
                 }
             }
         }
@@ -493,7 +501,7 @@ class Game {
         if (!this.myPlayerId || !this.player) return; 
 
         // --- Добавим лог перед проверкой фона ---
-        console.log(`[Render Start] Frame for ${this.player.name}. Is Predator: ${this.player.isPredator}`);
+        // console.log(`[Render Start] Frame for ...`); // Удалено
 
         // --- Расчет цвета фона (используем this.player) ---
         let backgroundColor;

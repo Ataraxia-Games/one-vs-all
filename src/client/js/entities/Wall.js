@@ -64,16 +64,12 @@ export class Wall {
     }
 
     render(ctx, isPredatorView = false) {
-        console.log(`[Wall Render] isPredatorView: ${isPredatorView}, Original Color: ${this.color}`);
         ctx.save();
         ctx.translate(this.x, this.y); // Переходим в центр стены
         ctx.rotate(this.angle);      // Поворачиваем систему координат
 
-        // Выбираем цвет в зависимости от смотрящего
         const renderColor = isPredatorView ? 'rgb(128, 128, 128)' : this.color;
-        console.log(`[Wall Render] Render Color: ${renderColor}`);
 
-        // Рисуем стену, центрированную локально (вдоль повернутой оси X)
         ctx.fillStyle = renderColor; // Используем выбранный цвет
         // x: -длина/2, y: -ширина(толщина)/2, ширина: длина, высота: ширина(толщина)
         ctx.fillRect(-this.length / 2, -this.width / 2, this.length, this.width);

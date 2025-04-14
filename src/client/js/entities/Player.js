@@ -52,12 +52,34 @@ export class Player {
             this.angle = Math.atan2(aimDy, aimDx);
         }
 
-        // Генерируем круги локально при нажатии Shift
-        if (input.isShiftDown) { // Убираем проверку на движение (input.keys...)
-             this.tryGenerateSpeedCircle();
+        // Генерируем круги локально при нажатии Shift - ВОЗВРАЩАЕМ ЛОКАЛЬНУЮ ЛОГИКУ
+        if (input.isShiftDown) { 
+            /* // Старый сетевой код
+            const now = performance.now();
+            if (now - this.lastSpeedCircleTime > this.speedCircleCooldown) {
+                this.lastSpeedCircleTime = now;
+                if (window.game && window.game.socket) {
+                    window.game.socket.emit('playerUsedSprintEffect');
+                }
+            }
+            */
+             this.tryGenerateSpeedCircle(); // Возвращаем вызов локального метода
          }
         
         // Движение и столкновения теперь обрабатываются сервером
+    }
+
+    // Метод tryGenerateSpeedCircle СНОВА НУЖЕН
+    tryGenerateSpeedCircle() {
+        const now = performance.now();
+        if (now - this.lastSpeedCircleTime > this.speedCircleCooldown) {
+            this.lastSpeedCircleTime = now;
+            // Сигнализируем игре о необходимости создать круг
+            // Game class будет отвечать за создание и добавление эффекта
+            if (this.onSpeedCircle) { // Проверяем, есть ли обработчик
+                 this.onSpeedCircle(this.x, this.y);
+            }
+        }
     }
 
     // Метод для создания пуль - БОЛЬШЕ НЕ НУЖЕН НА КЛИЕНТЕ
@@ -203,18 +225,6 @@ export class Player {
         // this.color = originalColor; // Восстанавливаем оригинальный цвет - БОЛЬШЕ НЕ НУЖНО?
         // Оставляем пока что, т.к. this.color мог меняться не только для isSelf
         this.color = originalColor; 
-    }
-
-    tryGenerateSpeedCircle() {
-        const now = performance.now();
-        if (now - this.lastSpeedCircleTime > this.speedCircleCooldown) {
-            this.lastSpeedCircleTime = now;
-            // Сигнализируем игре о необходимости создать круг
-            // Game class будет отвечать за создание и добавление эффекта
-            if (this.onSpeedCircle) { // Проверяем, есть ли обработчик
-                 this.onSpeedCircle(this.x, this.y);
-            }
-        }
     }
 
     takeDamage(amount) {
