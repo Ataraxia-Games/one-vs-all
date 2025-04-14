@@ -1,3 +1,5 @@
+import { Player } from '../entities/Player.js'; // Убедимся, что Player импортирован
+
 export class GameEngine {
     constructor(ctx) {
         this.ctx = ctx;
@@ -28,6 +30,15 @@ export class GameEngine {
     // Метод для удаления конкретной пули
     removeBullet(bulletToRemove) {
         this.bullets = this.bullets.filter(bullet => bullet !== bulletToRemove);
+    }
+
+    // Метод для удаления ВСЕХ сущностей, пуль и эффектов
+    clearAllEntities() {
+        this.entities = [];
+        this.walls = [];
+        this.bullets = [];
+        this.effects = [];
+        console.log("Cleared all entities from GameEngine.");
     }
 
     removeEntity(entity) {
@@ -125,22 +136,25 @@ export class GameEngine {
         this.cleanupEffects();
     }
 
-    render() {
+    render(myPlayerId) {
         // Рендерим основные сущности (игроки, стены)
         this.entities.forEach(entity => {
             if (entity.render) {
-                entity.render(this.ctx);
+                if (entity instanceof Player) { // Проверяем, является ли сущность игроком
+                    entity.render(this.ctx, entity.id === myPlayerId); // Передаем флаг isSelf
+                } else {
+                    entity.render(this.ctx); // Обычный рендер для других сущностей (стен)
+                }
             }
         });
 
         // Рендерим пули
         this.bullets.forEach(bullet => {
-            bullet.render(this.ctx);
+            if (bullet.render) { // Добавим проверку на всякий случай
+                 bullet.render(this.ctx);
+            }
         });
 
         // ЭФФЕКТЫ БОЛЬШЕ НЕ РЕНДЕРЯТСЯ ЗДЕСЬ
-        // this.effects.forEach(effect => {
-        //     effect.render(this.ctx);
-        // });
     }
 } 

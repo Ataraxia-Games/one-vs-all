@@ -174,6 +174,10 @@ class Game {
         });
         
         // TODO: Добавить обработчик 'disconnect' для возврата к экрану входа
+        this.socket.on('disconnect', (reason) => {
+            console.warn(`Disconnected from server: ${reason}`);
+            this.handleDisconnectionOrDeath("Отключен от сервера");
+        });
     }
 
     // Синхронизирует локальные сущности с серверным состоянием players
@@ -360,20 +364,28 @@ class Game {
     }
 
     gameLoop(timestamp) {
-        if (!this.socket || !this.myPlayerId) return; // Не запускаем цикл без подключения
+        if (!this.socket || !this.myPlayerId) return; 
+
+        // Сохраняем ID для cancelAnimationFrame
+        this.animationFrameId = requestAnimationFrame((time) => this.gameLoop(time));
 
         const deltaTime = timestamp - this.lastTime; 
         this.lastTime = timestamp;
 
         const input = this.update(deltaTime);
+        // Проверяем смерть ПОСЛЕ update, где может быть получен урон
+        if (this.player && this.player.currentHealth <= 0) {
+            this.handleDisconnectionOrDeath("Вы погибли!");
+            return; // Прерываем текущий кадр
+        }
         this.interpolateEntities(); 
         this.render(input); 
         
-        requestAnimationFrame((time) => this.gameLoop(time));
+        // requestAnimationFrame((time) => this.gameLoop(time)); // Перенесено в начало
     }
 
     update(deltaTime) {
-        if (!this.myPlayerId || !this.player) return; // Ничего не делаем, пока не инициализированы
+        if (!this.myPlayerId || !this.player) return {}; // Возвращаем пустой объект, если не готовы
 
         const input = this.inputHandler.getInput(); 
 
@@ -407,25 +419,9 @@ class Game {
         const worldMouseX = (input.rawMouseX - cameraX) / this.zoom;
         const worldMouseY = (input.rawMouseY - cameraY) / this.zoom;
         
-        // Add calculated world mouse coordinates to the main input object
         input.mouse = { x: worldMouseX, y: worldMouseY }; 
 
-        // --- Обновление своего игрока (только угол и локальные эффекты/события) ---
-        if (worldMouseX !== undefined && worldMouseY !== undefined) {
-            const aimDx = worldMouseX - this.player.x;
-            const aimDy = worldMouseY - this.player.y;
-            this.player.angle = Math.atan2(aimDy, aimDx);
-        }
-        
-        // Вызываем генерацию кругов (если нужно)
-        // Локальное движение (предсказание) пока не реализуем, позиция придет с сервера
-        // this.player.update(deltaTime, input, this.gameEngine.walls); // НЕ вызываем полный update
-         if (input.isShiftDown && (input.keys.w || input.keys.a || input.keys.s || input.keys.d)) {
-             // Вызов tryGenerateSpeedCircle перенесен в Player.update 
-             // this.player.tryGenerateSpeedCircle();
-         }
-
-        // Обновляем локального игрока (включая движение для предсказания)
+        // --- Обновление своего игрока (предсказание и локальные действия) ---
         this.player.update(deltaTime, input, this.gameEngine.walls);
 
         // --- Отправляем ввод на сервер --- 
@@ -436,42 +432,38 @@ class Game {
         };
         this.socket.emit('playerInput', inputToSend);
 
-        // --- Обновляем только локальные эффекты и пули (если они создаются локально) ---
-        // Пули теперь на сервере, так что gameEngine.update не нужен для них
-        // this.gameEngine.update(deltaTime, input); // Вызов update у сущностей больше не нужен здесь
+        // --- Обновляем только локальные эффекты --- 
         this.gameEngine.effects.forEach(effect => effect.update(deltaTime));
         this.gameEngine.cleanupEffects();
         
-        // --- Стрельба (отправка события на сервер) ---
-        if (input.isLeftMouseClick) {
-            // Отправляем событие выстрела, сервер создаст пули
+        // --- Стрельба (отправка события на сервер, ТОЛЬКО для Охотников) ---
+        if (input.isLeftMouseClick && this.player && !this.player.isPredator) {
             this.socket.emit('playerShoot'); 
-            // const newBullets = this.player.shoot(); // Не создаем пули локально
-            // if (newBullets.length > 0) {
-            //     newBullets.forEach(bullet => this.gameEngine.addBullet(bullet));
-            // }
         }
-
-        // Вызываем локальный update игрока (для угла и эффектов)
-        if (this.player) {
-            this.player.update(deltaTime, input, this.gameEngine.walls); 
-        }
-
-        return input; // Возвращаем для render
+        
+        return input; // Возвращаем input для render
     }
 
     render(input) {
         if (!this.myPlayerId || !this.player) return; 
 
+        // --- Добавим лог перед проверкой фона ---
+        console.log(`[Render Start] Frame for ${this.player.name}. Is Predator: ${this.player.isPredator}`);
+
         // --- Расчет цвета фона (используем this.player) ---
-        let backgroundColor = 'rgb(78, 87, 40)';
-        const healthPercent = Math.max(0, Math.min(1, this.player.currentHealth / this.player.maxHealth));
-        const fullHealthColor = { r: 78, g: 87, b: 40 }; 
-        const zeroHealthColor = { r: 120, g: 0, b: 0 }; 
-        const r = Math.round(fullHealthColor.r + (zeroHealthColor.r - fullHealthColor.r) * (1 - healthPercent));
-        const g = Math.round(fullHealthColor.g + (zeroHealthColor.g - fullHealthColor.g) * (1 - healthPercent));
-        const b = Math.round(fullHealthColor.b + (zeroHealthColor.b - fullHealthColor.b) * (1 - healthPercent));
-        backgroundColor = `rgb(${r}, ${g}, ${b})`;
+        let backgroundColor;
+        if (this.player.isPredator) {
+             backgroundColor = 'rgb(100, 100, 100)'; // Серый фон для Хищника
+        } else {
+            // Градиентный фон для Охотников
+            const healthPercent = Math.max(0, Math.min(1, this.player.currentHealth / this.player.maxHealth));
+            const fullHealthColor = { r: 78, g: 87, b: 40 }; 
+            const zeroHealthColor = { r: 120, g: 0, b: 0 }; 
+            const r = Math.round(fullHealthColor.r + (zeroHealthColor.r - fullHealthColor.r) * (1 - healthPercent));
+            const g = Math.round(fullHealthColor.g + (zeroHealthColor.g - fullHealthColor.g) * (1 - healthPercent));
+            const b = Math.round(fullHealthColor.b + (zeroHealthColor.b - fullHealthColor.b) * (1 - healthPercent));
+            backgroundColor = `rgb(${r}, ${g}, ${b})`;
+        }
 
         // Clear main canvas
         this.ctx.fillStyle = backgroundColor;
@@ -484,10 +476,10 @@ class Game {
         this.ctx.translate(cameraX, cameraY);
         this.ctx.scale(this.zoom, this.zoom);
         // Рендерим все сущности из gameEngine (игроки, стены)
-        this.gameEngine.render(); 
+        this.gameEngine.render(this.myPlayerId); // <-- Передаем ID своего игрока
         
         // --- Render UI (Ammo Count) - ВНУТРИ МАСШТАБИРУЕМОГО КОНТЕКСТА --- 
-        if (this.player) { 
+        if (this.player && !this.player.isPredator) { 
             const ammoCount = this.player.ammo;
             const fontSize = 14; // Фиксированный размер шрифта
             
@@ -503,104 +495,163 @@ class Game {
 
         this.ctx.restore(); // <-- Конец блока мира
         
-        // --- Render Fog of War (используем this.player) --- 
-        this.fogCtx.clearRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
-        this.fogCtx.fillStyle = 'rgba(0, 0, 0, 1)';
-        this.fogCtx.fillRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
-        const playerScreenX = this.fogCanvas.width / 2;
-        const playerScreenY = this.fogCanvas.height / 2;
-        const numRays = 120;
-        const fovAngle = this.currentFovAngle; 
-        const worldViewRadius = this.currentWorldViewRadius; 
-        const angleStep = fovAngle / numRays;
-        const startAngle = this.player.angle - fovAngle / 2;
-        const visibilityPoints = []; 
-
-        // Находим сущность Хищника (если мы Охотник)
-        let predatorEntity = null;
-        if (this.player && !this.player.isPredator) { // Если мы - Охотник
-            for (const id in this.playerEntities) {
-                if (this.playerEntities[id].isPredator) {
-                    predatorEntity = this.playerEntities[id];
-                    break;
-                }
-            }
-        }
-
-        for (let i = 0; i <= numRays; i++) {
-            const currentAngle = startAngle + i * angleStep;
-            const rayEndXWorld = this.player.x + worldViewRadius * Math.cos(currentAngle);
-            const rayEndYWorld = this.player.y + worldViewRadius * Math.sin(currentAngle);
-            let closestHit = null;
-            let minHitDistSq = worldViewRadius * worldViewRadius;
-
-            // 1. Проверка пересечения со стенами
-            for (const wall of this.gameEngine.walls) {
-                for (let j = 0; j < wall.corners.length; j++) {
-                    const corner1 = wall.corners[j];
-                    const corner2 = wall.corners[(j + 1) % wall.corners.length];
-                    const hit = intersectSegments(this.player.x, this.player.y, rayEndXWorld, rayEndYWorld, corner1.x, corner1.y, corner2.x, corner2.y );
-                    if (hit) {
-                        const dx = hit.x - this.player.x;
-                        const dy = hit.y - this.player.y;
-                        const distSq = dx * dx + dy * dy;
-                        if (distSq < minHitDistSq) { minHitDistSq = distSq; closestHit = hit; }
-                    }
-                }
-            }
-
-            // 2. Проверка пересечения с Хищником (только для Охотников)
-            if (predatorEntity && predatorEntity.getCorners) { // Если мы Охотник и Хищник найден
-                const predatorCorners = predatorEntity.getCorners();
-                for (let j = 0; j < predatorCorners.length; j++) {
-                    const corner1 = predatorCorners[j];
-                    const corner2 = predatorCorners[(j + 1) % predatorCorners.length]; // Замыкаем квадрат
-                    const hit = intersectSegments(this.player.x, this.player.y, rayEndXWorld, rayEndYWorld, corner1.x, corner1.y, corner2.x, corner2.y );
-                    if (hit) {
-                        const dx = hit.x - this.player.x;
-                        const dy = hit.y - this.player.y;
-                        const distSq = dx * dx + dy * dy;
-                        if (distSq < minHitDistSq) { minHitDistSq = distSq; closestHit = hit; }
-                    }
-                }
-            }
-
-            // Определяем конечную точку луча
-            let finalPointWorldX, finalPointWorldY;
-            if (closestHit) { finalPointWorldX = closestHit.x; finalPointWorldY = closestHit.y; }
-            else { finalPointWorldX = rayEndXWorld; finalPointWorldY = rayEndYWorld; }
-            const finalPointScreenX = playerScreenX + (finalPointWorldX - this.player.x) * this.zoom;
-            const finalPointScreenY = playerScreenY + (finalPointWorldY - this.player.y) * this.zoom;
-            visibilityPoints.push({ x: finalPointScreenX, y: finalPointScreenY });
-        }
-
-        if (visibilityPoints.length > 0) {
-            this.fogCtx.beginPath(); this.fogCtx.moveTo(playerScreenX, playerScreenY); visibilityPoints.forEach(p => this.fogCtx.lineTo(p.x, p.y)); this.fogCtx.closePath();
-            const screenViewRadius = this.currentWorldViewRadius * this.zoom;
-            const fovGradient = this.fogCtx.createRadialGradient( playerScreenX, playerScreenY, screenViewRadius * 0.2, playerScreenX, playerScreenY, screenViewRadius );
-            fovGradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); fovGradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); 
-            this.fogCtx.globalCompositeOperation = 'destination-out'; this.fogCtx.fillStyle = fovGradient; this.fogCtx.fill();
-            const closeRadiusWorld = 70; const closeRadiusScreen = closeRadiusWorld * this.zoom;
-            const closeGradient = this.fogCtx.createRadialGradient(
-                playerScreenX, playerScreenY, 0, // Центр
-                playerScreenX, playerScreenY, closeRadiusScreen // Край
-            );
-            // Линейный градиент: ИНВЕРТИРОВАН - от невидимого к видимому
-            closeGradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); // Невидимый центр (непрозрачный цвет стирает под 'destination-out')
-            closeGradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); // Видимый край (прозрачный цвет НЕ стирает)
+        // --- Render Hunter FOV (для Хищника) --- 
+        if (this.player && this.player.isPredator) {
+            console.log("[Render FOV Cones] Executing as Predator."); // Лог
+            this.ctx.save();
+            this.ctx.translate(cameraX, cameraY); // Используем те же значения камеры
+            this.ctx.scale(this.zoom, this.zoom);
             
-            this.fogCtx.globalCompositeOperation = 'destination-out'; // Стираем туман
-            this.fogCtx.beginPath();
-            this.fogCtx.arc(playerScreenX, playerScreenY, closeRadiusScreen, 0, Math.PI * 2);
-            this.fogCtx.closePath();
-            this.fogCtx.fillStyle = closeGradient; 
-            this.fogCtx.fill();
-            this.fogCtx.globalCompositeOperation = 'source-over'; // Возвращаем обычный режим
+            // Базовые параметры FOV Охотника (можно взять из Game или определить здесь)
+            const hunterBaseFovAngle = Math.PI / 2; // 90 градусов
+            const hunterBaseWorldViewRadius = 700; // Базовая дальность
+            
+            this.ctx.fillStyle = 'rgba(255, 255, 0, 0.15)'; // Полупрозрачный желтый
+            this.ctx.strokeStyle = 'rgba(255, 255, 0, 0.3)';
+            this.ctx.lineWidth = 1 / this.zoom; // Тонкая линия, не зависящая от зума
+
+            for (const id in this.playerEntities) {
+                 const entity = this.playerEntities[id];
+                 // Рисуем FOV только для других игроков-Охотников
+                 if (id !== this.myPlayerId && !entity.isPredator) {
+                     const angle = entity.angle;
+                     const fov = hunterBaseFovAngle; // Используем базовый FOV
+                     const radius = hunterBaseWorldViewRadius; // Используем базовую дальность
+                     
+                     this.ctx.beginPath();
+                     this.ctx.moveTo(entity.x, entity.y);
+                     this.ctx.arc(entity.x, entity.y, radius, angle - fov / 2, angle + fov / 2);
+                     this.ctx.closePath();
+                     this.ctx.fill();
+                     this.ctx.stroke();
+                 }
+            }
+            this.ctx.restore();
         }
-        this.ctx.drawImage(this.fogCanvas, 0, 0);
+
+        // --- Render Fog of War (для Охотника) --- 
+        if (this.player && !this.player.isPredator) {
+            console.log("[Render Fog] Executing as Hunter."); // Лог
+            this.fogCtx.clearRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
+            this.fogCtx.fillStyle = 'rgba(0, 0, 0, 1)';
+            this.fogCtx.fillRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
+            const playerScreenX = this.fogCanvas.width / 2;
+            const playerScreenY = this.fogCanvas.height / 2;
+            const numRays = 120;
+            const fovAngle = this.currentFovAngle; 
+            const worldViewRadius = this.currentWorldViewRadius; 
+            const angleStep = fovAngle / numRays;
+            const startAngle = this.player.angle - fovAngle / 2;
+            const visibilityPoints = []; 
+
+            for (let i = 0; i <= numRays; i++) {
+                const currentAngle = startAngle + i * angleStep;
+                const rayEndXWorld = this.player.x + worldViewRadius * Math.cos(currentAngle);
+                const rayEndYWorld = this.player.y + worldViewRadius * Math.sin(currentAngle);
+                let closestHit = null;
+                let minHitDistSq = worldViewRadius * worldViewRadius;
+
+                // 1. Проверка пересечения со стенами (ВОССТАНАВЛИВАЕМ КОД)
+                for (const wall of this.gameEngine.walls) {
+                    // У Wall должен быть метод getSegments() или доступ к corners
+                    const corners = wall.getCorners ? wall.getCorners() : wall.corners; // Адаптируемся
+                    if (corners && corners.length > 1) {
+                        for (let j = 0; j < corners.length; j++) {
+                            const corner1 = corners[j];
+                            const corner2 = corners[(j + 1) % corners.length]; // Замыкаем полигон стены
+                            const hit = intersectSegments(this.player.x, this.player.y, rayEndXWorld, rayEndYWorld, corner1.x, corner1.y, corner2.x, corner2.y );
+                            if (hit) {
+                                const dx = hit.x - this.player.x;
+                                const dy = hit.y - this.player.y;
+                                const distSq = dx * dx + dy * dy;
+                                if (distSq < minHitDistSq) {
+                                    minHitDistSq = distSq;
+                                    closestHit = hit;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 2. Проверка пересечения с Хищником (ВОССТАНАВЛИВАЕМ КОД)
+                // Мы знаем, что this.player не хищник, ищем хищника
+                let predatorEntity = null;
+                for (const id in this.playerEntities) {
+                    if (this.playerEntities[id].isPredator) {
+                        predatorEntity = this.playerEntities[id];
+                        break;
+                    }
+                }
+                if (predatorEntity && predatorEntity.getCorners) { 
+                    const predatorCorners = predatorEntity.getCorners();
+                    for (let j = 0; j < predatorCorners.length; j++) {
+                         const corner1 = predatorCorners[j];
+                         const corner2 = predatorCorners[(j + 1) % predatorCorners.length]; // Замыкаем квадрат
+                         const hit = intersectSegments(this.player.x, this.player.y, rayEndXWorld, rayEndYWorld, corner1.x, corner1.y, corner2.x, corner2.y );
+                         if (hit) {
+                             const dx = hit.x - this.player.x;
+                             const dy = hit.y - this.player.y;
+                             const distSq = dx * dx + dy * dy;
+                             if (distSq < minHitDistSq) { // Если Хищник ближе текущего closestHit
+                                 minHitDistSq = distSq;
+                                 closestHit = hit;
+                             }
+                         }
+                    }
+                }
+
+                // Определяем конечную точку луча (ВОССТАНОВЛЕННЫЙ КОД)
+                let finalPointWorldX, finalPointWorldY;
+                if (closestHit) {
+                    finalPointWorldX = closestHit.x;
+                    finalPointWorldY = closestHit.y;
+                } else {
+                    finalPointWorldX = rayEndXWorld;
+                    finalPointWorldY = rayEndYWorld;
+                }
+                // Переводим в экранные координаты для fogCanvas
+                const finalPointScreenX = playerScreenX + (finalPointWorldX - this.player.x) * this.zoom;
+                const finalPointScreenY = playerScreenY + (finalPointWorldY - this.player.y) * this.zoom;
+
+                // Добавляем точку в массив для полигона видимости
+                visibilityPoints.push({ x: finalPointScreenX, y: finalPointScreenY });
+            }
+
+            if (visibilityPoints.length > 0) {
+                // --- Отрисовка полигона видимости --- 
+                this.fogCtx.beginPath(); 
+                this.fogCtx.moveTo(playerScreenX, playerScreenY); 
+                visibilityPoints.forEach(p => this.fogCtx.lineTo(p.x, p.y)); 
+                this.fogCtx.closePath();
+                const screenViewRadius = this.currentWorldViewRadius * this.zoom;
+                const fovGradient = this.fogCtx.createRadialGradient( playerScreenX, playerScreenY, screenViewRadius * 0.2, playerScreenX, playerScreenY, screenViewRadius );
+                fovGradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); 
+                fovGradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); 
+                this.fogCtx.globalCompositeOperation = 'destination-out'; 
+                this.fogCtx.fillStyle = fovGradient; 
+                this.fogCtx.fill();
+                
+                // --- Ближний круг видимости (инвертированный) ---
+                const closeRadiusWorld = 70; // Используем значение, которое вы установили
+                const closeRadiusScreen = closeRadiusWorld * this.zoom;
+                const closeGradient = this.fogCtx.createRadialGradient( playerScreenX, playerScreenY, 0, playerScreenX, playerScreenY, closeRadiusScreen );
+                closeGradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); // Невидимый центр
+                closeGradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); // Видимый край
+                
+                this.fogCtx.globalCompositeOperation = 'destination-out'; 
+                this.fogCtx.beginPath();
+                this.fogCtx.arc(playerScreenX, playerScreenY, closeRadiusScreen, 0, Math.PI * 2);
+                this.fogCtx.closePath();
+                this.fogCtx.fillStyle = closeGradient; 
+                this.fogCtx.fill();
+                this.fogCtx.globalCompositeOperation = 'source-over'; 
+            }
+            // Накладываем получившийся туман на основной холст
+            this.ctx.drawImage(this.fogCanvas, 0, 0);
+        }
         // --- End Fog of War ---
 
-        // --- Render World Effects OVER the fog ---
+        // --- Render World Effects OVER the fog (или без него для Хищника) ---
         this.ctx.save();
         this.ctx.translate(cameraX, cameraY); 
         this.ctx.scale(this.zoom, this.zoom);
@@ -622,11 +673,19 @@ class Game {
         // --- End Custom Crosshair ---
 
         // --- Render UI --- 
-        this.renderPlayerList(); // Отрисовка списка игроков
-        this.renderCrosshair(input); // Отрисовка прицела
+        this.renderPlayerList(); // ВОЗВРАЩАЕМ список игроков справа
+        this.renderCrosshair(input); // Оставили только прицел
     }
 
-    // Новый метод для отрисовки списка игроков
+    // Переименован метод для ясности
+    renderCrosshair(input) {
+        if (input && input.rawMouseX !== undefined) {
+             // ... (код отрисовки прицела) ...
+             this.ctx.stroke();
+        }
+    }
+
+    // Метод для отрисовки списка игроков (снова используется)
     renderPlayerList() {
         const padding = 10;
         const startX = this.canvas.width - padding;
@@ -641,7 +700,6 @@ class Game {
 
         // Получаем массив игроков из this.players и сортируем (опционально)
         const playerList = Object.values(this.players);
-        // Можно добавить сортировку, например, по имени или ID
         // playerList.sort((a, b) => a.name.localeCompare(b.name));
 
         playerList.forEach(player => {
@@ -650,7 +708,7 @@ class Game {
             
             this.ctx.fillStyle = isDead ? 'red' : 'white';
             this.ctx.shadowColor = 'black';
-            this.ctx.shadowBlur = 1;
+            this.ctx.shadowBlur = 1; // Исправлено с this.shadowBlur
 
             let displayName = name;
             if (player.id === this.myPlayerId) {
@@ -676,12 +734,52 @@ class Game {
         this.ctx.restore();
     }
 
-    // Переименован метод для ясности
-    renderCrosshair(input) {
-        if (input && input.rawMouseX !== undefined) {
-             // ... (код отрисовки прицела) ...
-             this.ctx.stroke();
+    // Общая функция для обработки смерти или отключения
+    handleDisconnectionOrDeath(reasonMessage = "Игра окончена") {
+        console.log(`Handling disconnection or death: ${reasonMessage}`);
+
+        // 1. Остановить игровой цикл
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
         }
+        
+        // 2. Отключиться от сервера (если еще подключены)
+        if (this.socket && this.socket.connected) {
+            this.socket.disconnect();
+        }
+        this.socket = null;
+
+        // 3. Сбросить состояние игры
+        this.myPlayerId = null;
+        this.myName = "";
+        this.player = null;
+        this.players = {};
+        this.playerEntities = {};
+        this.bulletEntities = {};
+        this.gameEngine.clearAllEntities(); // Очищаем движок
+
+        // 4. Показать UI входа, скрыть канвас
+        const joinUi = document.getElementById('join-ui');
+        const gameCanvas = document.getElementById('gameCanvas');
+        const nameInput = document.getElementById('playerNameInput');
+        const joinButton = document.getElementById('joinButton');
+        const joinError = document.getElementById('joinError');
+
+        if (joinUi) joinUi.style.display = 'block';
+        if (gameCanvas) gameCanvas.style.display = 'none';
+
+        // 5. Разблокировать UI входа и показать причину
+        if (nameInput) nameInput.disabled = false;
+        if (joinButton) {
+             joinButton.disabled = false;
+             joinButton.textContent = 'Присоединиться';
+        }
+        if (joinError) {
+            joinError.textContent = reasonMessage;
+            joinError.style.display = 'block';
+        }
+        if (nameInput) nameInput.focus(); // Фокус на ввод имени
     }
 }
 

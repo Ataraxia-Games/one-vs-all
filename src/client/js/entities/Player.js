@@ -1,5 +1,6 @@
 import { checkCircleWallCollision } from '../utils/collision.js';
 import { Bullet } from './Bullet.js';
+import { SpeedCircle } from './SpeedCircle.js'; // Импортируем эффект
 
 export class Player {
     constructor(x, y) {
@@ -97,39 +98,97 @@ export class Player {
         ];
     }
 
-    render(ctx) {
+    render(ctx, isSelf = false) {
+        console.log(`[Player Render] ID: ${this.id}, isSelf: ${isSelf}, isPredator: ${this.isPredator}`); // <-- ОТЛАДКА В НАЧАЛЕ
+
+        let originalColor = this.color; 
+        let renderColor = originalColor; // Используем эту переменную для отрисовки
+
+        if (isSelf && this.isPredator) {
+            // Рассчитать цвет от зеленого к красному на основе здоровья
+            const healthPercent = Math.max(0, Math.min(1, this.currentHealth / this.maxHealth));
+            // Плавный переход от зеленого (0, 255, 0) к желтому (255, 255, 0) к красному (255, 0, 0)
+            let r, g, b = 0;
+            if (healthPercent > 0.5) {
+                // От зеленого к желтому (health 1.0 -> 0.5)
+                r = Math.round(255 * 2 * (1 - healthPercent));
+                g = 255;
+            } else {
+                // От желтого к красному (health 0.5 -> 0.0)
+                r = 255;
+                g = Math.round(255 * 2 * healthPercent);
+            }
+            renderColor = `rgb(${r}, ${g}, ${b})`; // Присваиваем цвет для рендера СЮДА
+            console.log(`[Self Predator Render] HP: ${this.currentHealth}/${this.maxHealth} (${healthPercent.toFixed(2)}%), Calculated Color: ${renderColor}`); // ОТЛАДКА
+        }
+
         ctx.save();
         ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle);
         
         if (this.isPredator) {
             // Рисуем квадрат Хищника
-            ctx.rotate(this.angle); // Поворачиваем контекст
             const size = this.radius * 2; // Полный размер стороны
-            ctx.fillStyle = this.color; // Используем цвет игрока (черный)
+            ctx.fillStyle = renderColor; // Используем renderColor
             // Рисуем квадрат с центром в (0, 0) повернутого контекста
             ctx.fillRect(-size / 2, -size / 2, size, size);
             // ctx.strokeStyle = 'red'; // Для отладки можно обвести
             // ctx.strokeRect(-size / 2, -size / 2, size, size);
         } else {
             // Рисуем круг Охотника (как раньше)
-            ctx.fillStyle = this.color; 
+            ctx.fillStyle = renderColor; // Используем renderColor
             ctx.beginPath();
             ctx.arc(0, 0, this.radius, 0, Math.PI * 2); 
             ctx.fill();
         }
 
-        // Draw Ammo Count (УБРАНО - теперь рисуется в Game.render)
+        // Отрисовка треугольника направления (УДАЛЕНО)
         /*
-        if (this.isSelf) { 
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.71)'; 
-            ctx.font = 'bold 17px Arial'; 
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(this.ammo, 0, this.radius + 15); 
+        if (!this.isPredator) {
+            ctx.beginPath();
+            ctx.moveTo(this.radius, 0);
+            ctx.lineTo(this.radius - 6, -4); // Точки относительно центра
+            ctx.lineTo(this.radius - 6, 4);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)'; // Белый полупрозрачный
+            ctx.fill();
+        }
+        */
+
+        // Отрисовка полоски здоровья (над игроком) (УДАЛЕНО)
+        /*
+        if (!this.isPredator) {
+            const healthBarWidth = this.radius * 0.8;
+            const healthBarHeight = 4;
+            const healthBarX = -healthBarWidth / 2;
+            const healthBarY = -this.radius / 2 - healthBarHeight - 2; // Над квадратом
+            const currentHealthWidth = healthBarWidth * (this.currentHealth / this.maxHealth);
+
+            // Фон полоски (темно-серый)
+            ctx.fillStyle = '#555';
+            ctx.fillRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight);
+            // Текущее здоровье (зеленый)
+            ctx.fillStyle = '#00ff00';
+            ctx.fillRect(healthBarX, healthBarY, currentHealthWidth, healthBarHeight);
         }
         */
 
         ctx.restore();
+
+        // Отрисовка имени игрока (только если не сам игрок и не Хищник)
+        if (!isSelf && this.name && !this.isPredator) {
+             ctx.save();
+             ctx.font = '12px Arial';
+             ctx.fillStyle = 'white';
+             ctx.textAlign = 'center';
+             ctx.textBaseline = 'bottom';
+             ctx.shadowColor = 'black';
+             ctx.shadowBlur = 2;
+             ctx.fillText(this.name, this.x, this.y - this.radius / 2 - 10); // Над полоской здоровья
+             ctx.restore();
+         }
+         
+        this.color = originalColor; // Восстанавливаем оригинальный цвет
     }
 
     tryGenerateSpeedCircle() {

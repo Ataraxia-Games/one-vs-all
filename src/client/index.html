@@ -15,7 +15,7 @@
             box-sizing: border-box; 
             /* Используем Flexbox для расположения элементов */
             display: flex;
-            justify-content: space-between; /* Размещаем баннеры по краям */
+            justify-content: center; /* Центрируем группу элементов */
             align-items: center; /* Вертикальное выравнивание по центру */
             height: 100vh; /* Занимаем всю высоту */
         }
@@ -87,6 +87,7 @@
             font-size: 12px;
             /* position: fixed; - Убираем, т.к. используем flex */
             z-index: 5; /* Ниже чем join-ui */
+            cursor: default; /* <-- Устанавливаем стандартный курсор */
         }
         /* Комментируем стили для нижнего баннера */
         /* 
