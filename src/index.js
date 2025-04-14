@@ -95,13 +95,14 @@ function checkCircleWallCollision(circle, wall) {
 // --- Map Generation (скопировано из client/js/entities/MapGenerator.js) ---
 // Простой класс Wall для MapGenerator'а на сервере
 class ServerMapWall {
-    constructor(x, y, length, angle, color = '#000000', width = 20) {
+    constructor(x, y, length, angle, color = '#000000', width = 20, isBoundary = false) {
         this.x = x;
         this.y = y;
         this.length = length;
         this.angle = angle;
         this.color = color;
         this.width = width;
+        this.isBoundary = isBoundary;
         // Углы будут вычислены и добавлены позже
         this.corners = []; 
     }
@@ -157,8 +158,8 @@ class MapGenerator {
             const angle = Math.atan2(dy, dx);
             const wallX = start.x + dx / 2;
             const wallY = start.y + dy / 2;
-            // Используем ServerMapWall
-            this.walls.push(new ServerMapWall(wallX, wallY, length, angle, '#000000')); 
+            // Используем ServerMapWall, указываем что это граница
+            this.walls.push(new ServerMapWall(wallX, wallY, length, angle, '#000000', 20, true));
         }
     }
 
@@ -173,8 +174,8 @@ class MapGenerator {
             const y = padding + Math.random() * (this.worldHeight - 2 * padding);
             const length = minLength + Math.random() * (maxLength - minLength);
             const angle = Math.random() * Math.PI * 2; 
-             // Используем ServerMapWall
-            this.walls.push(new ServerMapWall(x, y, length, angle, '#000000')); 
+             // Используем ServerMapWall, границей не является (по умолчанию false)
+            this.walls.push(new ServerMapWall(x, y, length, angle, '#000000'));
         }
     }
 
@@ -185,7 +186,7 @@ class MapGenerator {
 
 
 // -- Игровое состояние на сервере --
-const players = {}; // { id: { ..., name, health, ammo, isPredator, ... } }
+const players = {}; // { id: { ..., name, health, maxHealth, ammo, isPredator, ... } }
 const bullets = []; // <-- Массив для хранения активных пуль
 let nextBulletId = 0; // <-- Счетчик для уникальных ID пуль
 const worldWidth = 2000 * 1.3;
@@ -196,6 +197,9 @@ const serverWalls = mapGenerator.getWalls(); // Теперь содержит с
 console.log(`Generated ${serverWalls.length} walls on the server.`);
 const playerSpeed = 200; 
 const playerRadius = 15;
+const hunterBaseHealth = 100; // Базовое здоровье Охотника
+const BASE_PREDATOR_HEALTH = 100; // Базовое здоровье Хищника
+const HEALTH_PER_HUNTER = 50;   // Доп. здоровье за каждого Охотника
 const shootCooldown = 500; // Кулдаун выстрела в мс
 const bulletSpeed = 600; // Скорость пули (пикс/сек)
 const bulletLifetime = 1000; // Время жизни пули в мс
@@ -204,6 +208,12 @@ const shotgunSpread = Math.PI / 12; // Разброс дроби
 const bulletRadius = 2; // Добавим радиус пули для столкновений
 const bulletDamage = 10; // Урон от пули
 let predatorAssigned = false; // Флаг, что Хищник уже назначен
+
+// --- Хелпер-функция для расчета здоровья Хищника ---
+function calculatePredatorMaxHealth(numPlayers) {
+    const numHunters = Math.max(0, numPlayers - 1); // Считаем Охотников
+    return BASE_PREDATOR_HEALTH + numHunters * HEALTH_PER_HUNTER;
+}
 
 io.on('connection', (socket) => {
     console.log(`A user connected: ${socket.id}`);
@@ -223,6 +233,10 @@ io.on('connection', (socket) => {
             console.log(`Player "${playerName}" (${socket.id}) is the PREDATOR!`);
         }
 
+        // Рассчитываем начальное здоровье
+        const numPlayersTotal = Object.keys(players).length + 1;
+        const initialMaxHealth = isPredator ? calculatePredatorMaxHealth(numPlayersTotal) : hunterBaseHealth;
+
         // Создаем игрока
         players[socket.id] = {
             id: socket.id,
@@ -232,11 +246,25 @@ io.on('connection', (socket) => {
             y: worldHeight / 2 + (Math.random() - 0.5) * 100,
             angle: 0,
             color: '#000000', 
-            health: 100, 
+            maxHealth: initialMaxHealth, // Устанавливаем макс. здоровье
+            health: initialMaxHealth,    // Устанавливаем текущее здоровье
             ammo: 10,    
-            input: { keys: {}, angle: 0, isShiftDown: false },
-            lastShotTime: 0 
+            maxAmmo: 10, // Добавляем поле maxAmmo
+            input: { keys: {}, angle: 0, isShiftDown: false, isAiming: false }, // Добавляем isAiming
+            lastShotTime: 0, 
+            lastAttackTime: 0 // Для кулдауна атаки Хищника
         };
+
+        // Если присоединился ОХОТНИК, обновляем здоровье Хищника
+        if (!isPredator) {
+            const predatorId = Object.keys(players).find(id => id !== socket.id && players[id].isPredator);
+            if (predatorId) {
+                const newPredatorMaxHealth = calculatePredatorMaxHealth(Object.keys(players).length);
+                players[predatorId].maxHealth = newPredatorMaxHealth;
+                players[predatorId].health = newPredatorMaxHealth; // Исцеляем до нового максимума
+                console.log(`Predator ${players[predatorId].name} health updated to ${newPredatorMaxHealth} due to new Hunter.`);
+            }
+        }
 
         // Готовим данные стен для отправки
         const wallsToSend = serverWalls.map(wall => wall.getSerializableData());
@@ -305,20 +333,86 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Обработка атаки Хищника (пример с кулдауном)
+    socket.on('predatorAttack', () => {
+        const player = players[socket.id];
+        if (player && player.isPredator) {
+            const attackRange = 75; // Дальность атаки (было 60)
+            const attackAngleSpread = Math.PI / 3; // Угол ~60 градусов
+            const predatorAttackDamage = 35; 
+            const attackCooldown = 500; // 0.5 секунды
+
+            const now = Date.now();
+            if (player.lastAttackTime && now - player.lastAttackTime < attackCooldown) {
+                return; // Атака на кулдауне
+            }
+            player.lastAttackTime = now; 
+            console.log(`[Attack] Predator ${player.name} (${socket.id}) initiated attack.`);
+            
+            let hitDetected = false; // Флаг, что мы кого-то ударили
+            // --- Логика поиска цели и урона --- 
+            for (const targetId in players) {
+                if (targetId === socket.id) continue; // Не атакуем себя
+                const target = players[targetId];
+                // Атакуем только живых Охотников
+                if (!target.isPredator && target.health > 0) { 
+                    const dx = target.x - player.x;
+                    const dy = target.y - player.y;
+                    const distSq = dx * dx + dy * dy;
+
+                    // 1. Проверка дальности
+                    if (distSq <= attackRange * attackRange) {
+                        // 2. Проверка угла
+                        const angleToTarget = Math.atan2(dy, dx);
+                        let angleDiff = angleToTarget - player.angle;
+                        // Нормализуем угол [-PI, PI]
+                        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+                        if (Math.abs(angleDiff) <= attackAngleSpread / 2) {
+                            // --- Попадание! ---
+                            hitDetected = true;
+                            console.log(`[Attack Hit] Predator ${player.name} hit ${target.name}`);
+                            target.health -= predatorAttackDamage;
+                            target.health = Math.max(0, target.health); // Не уходим в минус
+                            // gameStateUpdate отправит новое здоровье всем
+                        }
+                    }
+                }
+            }
+            // --- Конец логики поиска цели ---
+            if(hitDetected) {
+                // Можно добавить звук или эффект на клиенте?
+                // io.to(socket.id).emit('predatorHitConfirm'); // Пример
+            }
+        }
+    });
+
     // Обработка отключения
     socket.on('disconnect', () => {
         console.log(`User disconnected: ${socket.id}`);
         const player = players[socket.id];
         if (player) {
             console.log(`Player "${player.name}" (${socket.id}) left.`);
-            // Если отключается Хищник, сбрасываем флаг
-            if (player.isPredator) {
-                console.log("Predator disconnected! Resetting assignment.");
-                predatorAssigned = false;
-                // TODO: Возможно, нужна логика выбора нового Хищника или завершения раунда?
+            const wasPredator = player.isPredator;
+            
+            // Если отключается ОХОТНИК, обновляем здоровье Хищника
+            if (!wasPredator) {
+                const predatorId = Object.keys(players).find(id => id !== socket.id && players[id].isPredator);
+                if (predatorId) {
+                    // Пересчитываем до удаления игрока
+                    const newPredatorMaxHealth = calculatePredatorMaxHealth(Object.keys(players).length - 1);
+                    players[predatorId].maxHealth = newPredatorMaxHealth;
+                    players[predatorId].health = Math.min(players[predatorId].health, newPredatorMaxHealth);
+                    console.log(`Predator ${players[predatorId].name} health updated to ${newPredatorMaxHealth} due to Hunter leaving.`);
+                }
+            } else {
+                 console.log("Predator disconnected! Resetting assignment.");
+                 predatorAssigned = false;
             }
+            
             delete players[socket.id];
-            io.emit('playerDisconnected', socket.id); // Сообщаем всем ID отключившегося
+            io.emit('playerDisconnected', socket.id); 
             console.log(`Total players: ${Object.keys(players).length}`);
         }
     });
@@ -351,32 +445,39 @@ function updatePlayer(player, dt) {
         deltaY *= factor;
     }
 
-    // --- Столкновения со стенами (Pushback) ---
-    let tempX = player.x + deltaX;
-    let tempY = player.y + deltaY;
-    
-    // Используем актуальную функцию checkCircleWallCollision
+    // Переменные для хранения итоговой позиции ПОСЛЕ проверки столкновений
+    let finalX = player.x + deltaX;
+    let finalY = player.y + deltaY;
+
+    // --- Столкновения со стенами (Pushback) - проверяем для ВСЕХ --- 
     const maxPushIterations = 3;
     for (let i = 0; i < maxPushIterations; i++) {
         let collisionOccurred = false;
         for (const wall of serverWalls) { 
+            // Пропускаем проверку для Хищника со ВНУТРЕННИМИ стенами
+            if (player.isPredator && !wall.isBoundary) {
+                continue;
+            }
+
+            // Проверяем столкновение с текущей предполагаемой позицией (finalX, finalY)
             const collisionResult = checkCircleWallCollision(
-                { x: tempX, y: tempY, radius: playerRadius }, 
-                wall // Передаем объект стены с углами
+                { x: finalX, y: finalY, radius: playerRadius }, 
+                wall 
             );
             if (collisionResult.collided) {
                 collisionOccurred = true;
                 const pushAmount = collisionResult.overlap + 0.01;
-                tempX += collisionResult.pushX * pushAmount;
-                tempY += collisionResult.pushY * pushAmount;
+                finalX += collisionResult.pushX * pushAmount; // Корректируем итоговую позицию
+                finalY += collisionResult.pushY * pushAmount; // Корректируем итоговую позицию
             }
         }
-        if (!collisionOccurred) break;
+        if (!collisionOccurred) break; // Если итерация прошла без коллизий, выходим
     }
-    // Применяем позицию после выталкивания
-    player.x = tempX;
-    player.y = tempY;
     // --- Конец столкновений ---
+
+    // Применяем позицию после всех проверок и выталкиваний
+    player.x = finalX;
+    player.y = finalY;
 
     // Ограничение по краям мира (грубое)
     player.x = Math.max(playerRadius, Math.min(worldWidth - playerRadius, player.x));
@@ -472,6 +573,7 @@ setInterval(() => {
             const inputKeys = p.input.keys || {};
             const isMoving = inputKeys.w || inputKeys.a || inputKeys.s || inputKeys.d;
             const isSprinting = !!(isMoving && p.input.isShiftDown); 
+            const isAiming = p.input.isAiming || false; // Получаем isAiming из player.input
             
             return {
                 id: p.id,
@@ -481,9 +583,12 @@ setInterval(() => {
                 y: p.y,
                 angle: p.angle,
                 color: p.color,
+                maxHealth: p.maxHealth, // <-- Отправляем maxHealth
                 health: p.health, 
                 ammo: p.ammo,     
-                isSprinting: isSprinting 
+                maxAmmo: p.maxAmmo, // <-- Отправляем maxAmmo
+                isSprinting: isSprinting, 
+                isAiming: isAiming // <-- Отправляем isAiming
             };
         }),
         bullets: bullets.map(bullet => ({ 

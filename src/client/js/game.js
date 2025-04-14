@@ -54,6 +54,11 @@ class Game {
         this.currentCrosshairRadius = this.baseCrosshairRadius;
         this.crosshairTransitionSpeed = 0.15; // Скорость изменения прицела
 
+        // Predator attack properties
+        this.predatorAttackCharge = 1.0; // Текущий заряд атаки (0.0 - 1.0)
+        this.predatorAttackChargeSpeed = 1.0; // Скорость заряда (% / сек)
+        this.predatorBaseAttackRange = 75; // Базовая дальность атаки (было 50)
+
         // НЕ подключаемся и не запускаем цикл здесь
         // this.setupSocketListeners();
         // this.initGame(); 
@@ -400,10 +405,12 @@ class Game {
         const input = this.inputHandler.getInput(); 
 
         // --- Обновляем Zoom, FOV, Crosshair (локально) ---
+        /* // --- Зум колесом отключен ---
         if (input.wheelDelta !== 0) {
             this.zoom -= input.wheelDelta * this.zoomSpeed;
             this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom));
         }
+        */ // --- Конец отключенного зума ---
 
         // --- Update Target FOV Radius & Angle based on RMB ---
         if (input.isRightMouseDown) {
@@ -452,10 +459,17 @@ class Game {
             if (this.player && !this.player.isPredator) {
                 this.socket.emit('playerShoot'); // Охотник стреляет
             } else if (this.player && this.player.isPredator) {
-                this.socket.emit('predatorAttack'); // Хищник атакует
+                // Отправляем атаку и сбрасываем заряд
+                this.socket.emit('predatorAttack'); 
+                this.predatorAttackCharge = 0; // Сброс заряда
             }
         }
-        // Правый клик обрабатывается в логике FOV и прицела
+        
+        // --- Обновление заряда атаки Хищника ---
+        if (this.player && this.player.isPredator) {
+            this.predatorAttackCharge += this.predatorAttackChargeSpeed * (deltaTime / 1000);
+            this.predatorAttackCharge = Math.min(1.0, this.predatorAttackCharge);
+        }
         
         return input; // Возвращаем input для render
     }
@@ -752,32 +766,33 @@ class Game {
                 this.ctx.arc(input.rawMouseX, input.rawMouseY, scaledRadius, 0, Math.PI * 2);
                 this.ctx.stroke();
             } else {
-                // --- Курсор Хищника (дуга) ---
+                // --- Курсор Хищника (ПОЛОСКА) ---
                 this.ctx.lineWidth = 3; // Толщина 3
-                const attackRange = 50; // Дальность атаки (мировые единицы)
-                const arcAngle = Math.PI / 2; // Ширина дуги (90 градусов)
+                // const attackRange = 50; // Старая константа
+                const currentAttackRange = this.predatorBaseAttackRange * this.predatorAttackCharge;
+                const cursorWidthAngle = Math.PI / 8; // Угол, определяющий ширину полоски (22.5 градуса в каждую сторону)
                 
-                // Вычисляем центр дуги в мировых координатах
-                const arcCenterXWorld = this.player.x + attackRange * Math.cos(this.player.angle);
-                const arcCenterYWorld = this.player.y + attackRange * Math.sin(this.player.angle);
+                // Рассчитываем 2 точки для краев полоски в мировых координатах
+                const angleLeft = this.player.angle - cursorWidthAngle / 2;
+                const angleRight = this.player.angle + cursorWidthAngle / 2;
+                
+                const pointLeftXWorld = this.player.x + currentAttackRange * Math.cos(angleLeft);
+                const pointLeftYWorld = this.player.y + currentAttackRange * Math.sin(angleLeft);
+                const pointRightXWorld = this.player.x + currentAttackRange * Math.cos(angleRight);
+                const pointRightYWorld = this.player.y + currentAttackRange * Math.sin(angleRight);
 
-                // Переводим центр дуги в экранные координаты (с учетом камеры и зума)
-                // НУЖНЫ cameraX и cameraY из начала render()
+                // Переводим в экранные координаты
                 const cameraX = this.canvas.width / 2 - this.player.x * this.zoom;
                 const cameraY = this.canvas.height / 2 - this.player.y * this.zoom;
-                const arcCenterXScreen = cameraX + arcCenterXWorld * this.zoom;
-                const arcCenterYScreen = cameraY + arcCenterYWorld * this.zoom;
+                const pointLeftXScreen = cameraX + pointLeftXWorld * this.zoom;
+                const pointLeftYScreen = cameraY + pointLeftYWorld * this.zoom;
+                const pointRightXScreen = cameraX + pointRightXWorld * this.zoom;
+                const pointRightYScreen = cameraY + pointRightYWorld * this.zoom;
                 
-                // Радиус дуги (для визуализации) - УВЕЛИЧЕН
-                const arcRadius = 25 * this.zoom; // Было 15
-
-                // Углы дуги (теперь вокруг направления взгляда) - ПОВЕРНУТО НА 90 ГРАДУСОВ ВЛЕВО
-                const startAngleArc = this.player.angle - arcAngle / 2;
-                const endAngleArc = this.player.angle + arcAngle / 2;
-
                 this.ctx.strokeStyle = '#ffffff'; // Белый цвет
                 this.ctx.beginPath();
-                this.ctx.arc(arcCenterXScreen, arcCenterYScreen, arcRadius, startAngleArc, endAngleArc);
+                this.ctx.moveTo(pointLeftXScreen, pointLeftYScreen);
+                this.ctx.lineTo(pointRightXScreen, pointRightYScreen);
                 this.ctx.stroke();
             }
         }
