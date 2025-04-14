@@ -142,7 +142,7 @@ export class GameEngine {
         this.entities.forEach(entity => {
             if (entity.render) {
                 if (entity instanceof Player) { // Проверяем, является ли сущность игроком
-                    entity.render(this.ctx, entity.id === myPlayerId); // Передаем флаг isSelf
+                    entity.render(this.ctx, entity.id === myPlayerId, isPlayerPredator);
                 } else if (entity instanceof Wall) { // Проверяем, стена ли это
                     entity.render(this.ctx, isPlayerPredator); // Передаем флаг хищника стене
                 } else {

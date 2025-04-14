@@ -208,6 +208,15 @@ class Game {
                  playerEntity.currentHealth = serverData.health !== undefined ? serverData.health : playerEntity.maxHealth;
                  playerEntity.ammo = serverData.ammo !== undefined ? serverData.ammo : playerEntity.ammo;
                  playerEntity.isSprinting = isSprintingFromServer;
+                 playerEntity.isAiming = serverData.isAiming || false; // <-- Добавляем флаг прицеливания
+                 playerEntity.maxAmmo = serverData.maxAmmo || 100;
+                 playerEntity.maxHealth = serverData.maxHealth || 100;
+                 playerEntity.currentHealth = serverData.health;
+                 playerEntity.isPredator = serverData.isPredator || false;
+                 playerEntity.isAiming = serverData.isAiming || false; // <-- Добавляем флаг прицеливания
+                 playerEntity.ammo = serverData.ammo;
+                 playerEntity.maxAmmo = serverData.maxAmmo;
+                 playerEntity.name = serverData.name || ""; // Сохраняем имя
 
                  // Привязываем обработчик кругов ВСЕМ игрокам
                  playerEntity.onSpeedCircle = (x, y) => {
@@ -237,6 +246,7 @@ class Game {
                  localEntity.isSprinting = isSprintingFromServer;
                  localEntity.isPredator = isPredatorFromServer; // <-- Обновляем роль
                  localEntity.name = serverData.name;
+                 localEntity.isAiming = serverData.isAiming || false; // <-- Обновляем флаг прицеливания
 
                  if (serverId !== this.myPlayerId) {
                      // Обновляем цель для интерполяции
@@ -428,7 +438,8 @@ class Game {
         const inputToSend = {
             keys: input.keys,
             angle: this.player.angle, // Отправляем актуальный угол
-            isShiftDown: input.isShiftDown // <-- Добавляем статус Shift
+            isShiftDown: input.isShiftDown, // Статус Shift (для спринта)
+            isAiming: input.isRightMouseDown // <-- Добавляем статус прицеливания
         };
         this.socket.emit('playerInput', inputToSend);
 
@@ -506,56 +517,46 @@ class Game {
             this.ctx.translate(cameraX, cameraY); // Используем те же значения камеры
             this.ctx.scale(this.zoom, this.zoom);
             
-            // Базовые параметры FOV Охотника
+            // Параметры FOV Охотника (базовые и суженные)
             const hunterBaseFovAngle = Math.PI / 2; 
             const hunterBaseWorldViewRadius = 700; 
+            const hunterNarrowFovAngle = Math.PI / 4; // Суженный угол (45 градусов)
+            const hunterNarrowWorldViewRadius = 1000; // Увеличенная дальность прицеливания
 
             for (const id in this.playerEntities) {
                  const entity = this.playerEntities[id];
                  // Рисуем FOV только для других игроков-Охотников
                  if (id !== this.myPlayerId && !entity.isPredator) {
-                    // Рассчитываем цвет конуса на основе здоровья Охотника
-                    // --- Расчет цвета (КОПИЯ ЛОГИКИ ФОНА ОХОТНИКА) ---
+                    // --- Расчет цвета (как у фона Охотника) - остается как есть ---
                     const healthPercent = Math.max(0, Math.min(1, entity.currentHealth / entity.maxHealth));
-                    const fullHealthColor = { r: 78, g: 87, b: 40 }; // Цвета как у фона
+                    const fullHealthColor = { r: 78, g: 87, b: 40 }; 
                     const zeroHealthColor = { r: 120, g: 0, b: 0 }; 
                     const r = Math.round(fullHealthColor.r + (zeroHealthColor.r - fullHealthColor.r) * (1 - healthPercent));
                     const g = Math.round(fullHealthColor.g + (zeroHealthColor.g - fullHealthColor.g) * (1 - healthPercent));
                     const b = Math.round(fullHealthColor.b + (zeroHealthColor.b - fullHealthColor.b) * (1 - healthPercent));
-                    /* Старая логика цвета
-                    let r, g, b;
-                    if (healthPercent > 0.5) { // От зеленого к желтому
-                        r = Math.round(255 * 2 * (1 - healthPercent));
-                        g = 255;
-                        b = 0;
-                    } else { // От желтого к красному
-                        r = 255;
-                        g = Math.round(255 * 2 * healthPercent);
-                        b = 0;
-                    }
-                    */
+                    
+                    // --- Выбор параметров FOV на основе entity.isAiming ---
+                    const isAiming = entity.isAiming; // Получаем флаг от сервера (ПОКА НЕ РАБОТАЕТ БЕЗ ПРАВОК СЕРВЕРА)
+                    const currentFovAngle = isAiming ? hunterNarrowFovAngle : hunterBaseFovAngle;
+                    const currentRadius = isAiming ? hunterNarrowWorldViewRadius : hunterBaseWorldViewRadius;
 
-                    // --- Создание градиента (ИНВЕРТИРОВАН) ---
+                    // --- Создание градиента (с использованием currentRadius) ---
                     const fovGradient = this.ctx.createRadialGradient(
-                        entity.x, entity.y, 0, // Центр градиента (начало)
-                        entity.x, entity.y, hunterBaseWorldViewRadius // Край градиента
+                        entity.x, entity.y, 0, 
+                        entity.x, entity.y, currentRadius // Используем текущий радиус
                     );
-                    // fovGradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.05)`); 
-                    // fovGradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.3)`);  
-                    fovGradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.3)`);  // Более насыщенный в центре
-                    fovGradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.05)`); // Почти прозрачный на краю
+                    fovGradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.3)`);  
+                    fovGradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.05)`); 
 
-                    this.ctx.fillStyle = fovGradient; // Используем градиент для заливки
+                    this.ctx.fillStyle = fovGradient; 
                      
                      const angle = entity.angle;
-                     const fov = hunterBaseFovAngle; // Используем базовый FOV
-                     const radius = hunterBaseWorldViewRadius; // Используем базовую дальность
-                     
+                     // Используем текущие параметры для отрисовки дуги
                      this.ctx.beginPath();
                      this.ctx.moveTo(entity.x, entity.y);
-                     this.ctx.arc(entity.x, entity.y, radius, angle - fov / 2, angle + fov / 2);
+                     this.ctx.arc(entity.x, entity.y, currentRadius, angle - currentFovAngle / 2, angle + currentFovAngle / 2);
                      this.ctx.closePath();
-                     this.ctx.fill(); // Только заливка
+                     this.ctx.fill(); 
                  }
             }
             this.ctx.restore();

@@ -6,12 +6,23 @@ export class Player {
     constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.radius = 15; 
-        this.speed = 200; // Увеличена скорость (пикселей В СЕКУНДУ)
-        this.angle = 0;
-        this.width = 30; // Keep for potential future use or rendering reference
-        this.height = 30;
+        this.targetX = x;
+        this.targetY = y;
+        this.angle = 0; // Угол направления (в радианах)
+        this.targetAngle = 0;
+        this.size = 30; // Размер игрока (диаметр круга или сторона квадрата)
+        this.radius = this.size / 2;
+        this.color = '#000000'; // Черный по умолчанию
+        this.speed = 200; // Пикселей в секунду
+        this.rotationSpeed = Math.PI * 1.5; // Радианов в секунду
+        this.maxHealth = 100;
+        this.currentHealth = 100;
+        this.name = ""; // Имя игрока
+        this.isPredator = false; // Флаг Хищника
+        this.isAiming = false; // Флаг прицеливания (для FOV)
         this.ammo = 10; // Начальное количество патронов
+        this.maxAmmo = 10; // Максимальное количество патронов
+        this.id = null; // ID игрока с сервера
 
         // Параметры дробовика
         this.shotgunPellets = 8;
@@ -98,34 +109,28 @@ export class Player {
         ];
     }
 
-    render(ctx, isSelf = false) {
-        console.log(`[Player Render] ID: ${this.id}, isSelf: ${isSelf}, isPredator: ${this.isPredator}`); // <-- ОТЛАДКА В НАЧАЛЕ
+    render(ctx, isSelf = false, isViewerPredator = false) {
+        // console.log(`[Player Render] ID: ${this.id}, isSelf: ${isSelf}, isPredator: ${this.isPredator}, isViewerPredator: ${isViewerPredator}`);
 
         let originalColor = this.color; 
-        let renderColor = originalColor; // Используем эту переменную для отрисовки
+        let renderColor = originalColor; 
 
-        if (isSelf && this.isPredator) {
-            // Рассчитать цвет от зеленого к красному на основе здоровья
+        if (isViewerPredator && !isSelf && !this.isPredator) {
+             // Хищник смотрит на Охотника -> серый цвет
+             renderColor = 'rgb(128, 128, 128)';
+        } else if (isSelf && this.isPredator) {
+            // Хищник смотрит на себя -> цвет по здоровью
             const healthPercent = Math.max(0, Math.min(1, this.currentHealth / this.maxHealth));
-            // --- Логика цвета КАК У ФОНА ОХОТНИКА --- 
+            // Логика цвета КАК У ФОНА ОХОТНИКА 
             const fullHealthColor = { r: 78, g: 87, b: 40 }; 
             const zeroHealthColor = { r: 120, g: 0, b: 0 }; 
             const r = Math.round(fullHealthColor.r + (zeroHealthColor.r - fullHealthColor.r) * (1 - healthPercent));
             const g = Math.round(fullHealthColor.g + (zeroHealthColor.g - fullHealthColor.g) * (1 - healthPercent));
             const b = Math.round(fullHealthColor.b + (zeroHealthColor.b - fullHealthColor.b) * (1 - healthPercent));
-            /* Старая логика (зелено-желто-красная)
-            let r, g, b = 0;
-            if (healthPercent > 0.5) {
-                r = Math.round(255 * 2 * (1 - healthPercent));
-                g = 255;
-            } else {
-                r = 255;
-                g = Math.round(255 * 2 * healthPercent);
-            }
-            */
-            renderColor = `rgb(${r}, ${g}, ${b})`; // Присваиваем цвет для рендера СЮДА
-            console.log(`[Self Predator Render] HP: ${this.currentHealth}/${this.maxHealth} (${healthPercent.toFixed(2)}%), Calculated Color: ${renderColor}`); // ОТЛАДКА
-        }
+            renderColor = `rgb(${r}, ${g}, ${b})`; 
+            // console.log(`[Self Predator Render] HP: ${this.currentHealth}/${this.maxHealth} (${healthPercent.toFixed(2)}%), Calculated Color: ${renderColor}`); 
+        } 
+        // Иначе renderColor остается originalColor
 
         ctx.save();
         ctx.translate(this.x, this.y);
