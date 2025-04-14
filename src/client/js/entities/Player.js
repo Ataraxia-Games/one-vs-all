@@ -52,8 +52,8 @@ export class Player {
             this.angle = Math.atan2(aimDy, aimDx);
         }
 
-        // Генерируем круги локально при намерении двигаться со спринтом
-        if (input.isShiftDown && (input.keys.w || input.keys.a || input.keys.s || input.keys.d)) {
+        // Генерируем круги локально при нажатии Shift
+        if (input.isShiftDown) { // Убираем проверку на движение (input.keys...)
              this.tryGenerateSpeedCircle();
          }
         

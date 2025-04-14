@@ -59,6 +59,10 @@ class Game {
         this.predatorAttackChargeSpeed = 1.0; // Скорость заряда (% / сек)
         this.predatorBaseAttackRange = 75; // Базовая дальность атаки (было 50)
 
+        // Predator fake trail properties
+        this.predatorFakeTrailCooldown = 100; // ms cooldown
+        this.lastPredatorFakeTrailTime = 0; // Timestamp of last trail effect
+
         // НЕ подключаемся и не запускаем цикл здесь
         // this.setupSocketListeners();
         // this.initGame(); 
@@ -469,6 +473,17 @@ class Game {
         if (this.player && this.player.isPredator) {
             this.predatorAttackCharge += this.predatorAttackChargeSpeed * (deltaTime / 1000);
             this.predatorAttackCharge = Math.min(1.0, this.predatorAttackCharge);
+
+            // --- Способность Хищника "Ложный след" (ПКМ) ---
+            if (input.isRightMouseDown) { // Используем isRightMouseDown для удержания
+                const now = performance.now(); // Время для кулдауна
+                if (now - this.lastPredatorFakeTrailTime > this.predatorFakeTrailCooldown) {
+                    // Создаем эффект локально. Для видимости у других - нужна сеть.
+                    this.gameEngine.addEffect(new SpeedCircle(input.mouse.x, input.mouse.y)); 
+                    console.log(`Predator used Fake Trail at ${input.mouse.x.toFixed(0)}, ${input.mouse.y.toFixed(0)}`); // Отладка
+                    this.lastPredatorFakeTrailTime = now; // Обновляем время последнего эффекта
+                }
+            }
         }
         
         return input; // Возвращаем input для render
@@ -797,6 +812,16 @@ class Game {
             }
         }
         // --- КОНЕЦ РИСОВАНИЯ КУРСОРА ---
+
+        // --- РИСУЕМ ВТОРОЙ КУРСОР ХИЩНИКА (КРУГ на месте мыши) --- 
+        if (this.player && this.player.isPredator && input && input.rawMouseX !== undefined) {
+            this.ctx.strokeStyle = '#ffffff';
+            this.ctx.lineWidth = 1;
+            this.ctx.beginPath();
+            this.ctx.arc(input.rawMouseX, input.rawMouseY, 5, 0, Math.PI * 2); // Диаметр 10 -> радиус 5
+            this.ctx.stroke();
+        }
+        // --- КОНЕЦ ВТОРОГО КУРСОРА --- 
     }
 
     // Метод для отрисовки списка игроков (снова используется)
