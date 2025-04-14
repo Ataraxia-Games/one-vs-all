@@ -107,17 +107,22 @@ export class Player {
         if (isSelf && this.isPredator) {
             // Рассчитать цвет от зеленого к красному на основе здоровья
             const healthPercent = Math.max(0, Math.min(1, this.currentHealth / this.maxHealth));
-            // Плавный переход от зеленого (0, 255, 0) к желтому (255, 255, 0) к красному (255, 0, 0)
+            // --- Логика цвета КАК У ФОНА ОХОТНИКА --- 
+            const fullHealthColor = { r: 78, g: 87, b: 40 }; 
+            const zeroHealthColor = { r: 120, g: 0, b: 0 }; 
+            const r = Math.round(fullHealthColor.r + (zeroHealthColor.r - fullHealthColor.r) * (1 - healthPercent));
+            const g = Math.round(fullHealthColor.g + (zeroHealthColor.g - fullHealthColor.g) * (1 - healthPercent));
+            const b = Math.round(fullHealthColor.b + (zeroHealthColor.b - fullHealthColor.b) * (1 - healthPercent));
+            /* Старая логика (зелено-желто-красная)
             let r, g, b = 0;
             if (healthPercent > 0.5) {
-                // От зеленого к желтому (health 1.0 -> 0.5)
                 r = Math.round(255 * 2 * (1 - healthPercent));
                 g = 255;
             } else {
-                // От желтого к красному (health 0.5 -> 0.0)
                 r = 255;
                 g = Math.round(255 * 2 * healthPercent);
             }
+            */
             renderColor = `rgb(${r}, ${g}, ${b})`; // Присваиваем цвет для рендера СЮДА
             console.log(`[Self Predator Render] HP: ${this.currentHealth}/${this.maxHealth} (${healthPercent.toFixed(2)}%), Calculated Color: ${renderColor}`); // ОТЛАДКА
         }
@@ -175,7 +180,8 @@ export class Player {
 
         ctx.restore();
 
-        // Отрисовка имени игрока (только если не сам игрок и не Хищник)
+        // Отрисовка имени игрока (ПЕРЕНЕСЕНО В Game.render)
+        /*
         if (!isSelf && this.name && !this.isPredator) {
              ctx.save();
              ctx.font = '12px Arial';
@@ -187,8 +193,11 @@ export class Player {
              ctx.fillText(this.name, this.x, this.y - this.radius / 2 - 10); // Над полоской здоровья
              ctx.restore();
          }
+         */
          
-        this.color = originalColor; // Восстанавливаем оригинальный цвет
+        // this.color = originalColor; // Восстанавливаем оригинальный цвет - БОЛЬШЕ НЕ НУЖНО?
+        // Оставляем пока что, т.к. this.color мог меняться не только для isSelf
+        this.color = originalColor; 
     }
 
     tryGenerateSpeedCircle() {

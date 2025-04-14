@@ -1,4 +1,5 @@
 import { Player } from '../entities/Player.js'; // Убедимся, что Player импортирован
+import { Wall } from '../entities/Wall.js'; // Убедимся, что Wall импортирован
 
 export class GameEngine {
     constructor(ctx) {
@@ -136,14 +137,16 @@ export class GameEngine {
         this.cleanupEffects();
     }
 
-    render(myPlayerId) {
+    render(myPlayerId, isPlayerPredator) {
         // Рендерим основные сущности (игроки, стены)
         this.entities.forEach(entity => {
             if (entity.render) {
                 if (entity instanceof Player) { // Проверяем, является ли сущность игроком
                     entity.render(this.ctx, entity.id === myPlayerId); // Передаем флаг isSelf
+                } else if (entity instanceof Wall) { // Проверяем, стена ли это
+                    entity.render(this.ctx, isPlayerPredator); // Передаем флаг хищника стене
                 } else {
-                    entity.render(this.ctx); // Обычный рендер для других сущностей (стен)
+                    entity.render(this.ctx); // Обычный рендер для других сущностей
                 }
             }
         });

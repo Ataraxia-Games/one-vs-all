@@ -436,10 +436,15 @@ class Game {
         this.gameEngine.effects.forEach(effect => effect.update(deltaTime));
         this.gameEngine.cleanupEffects();
         
-        // --- Стрельба (отправка события на сервер, ТОЛЬКО для Охотников) ---
-        if (input.isLeftMouseClick && this.player && !this.player.isPredator) {
-            this.socket.emit('playerShoot'); 
+        // --- Обработка кликов мыши (отправка событий на сервер) ---
+        if (input.isLeftMouseClick) {
+            if (this.player && !this.player.isPredator) {
+                this.socket.emit('playerShoot'); // Охотник стреляет
+            } else if (this.player && this.player.isPredator) {
+                this.socket.emit('predatorAttack'); // Хищник атакует
+            }
         }
+        // Правый клик обрабатывается в логике FOV и прицела
         
         return input; // Возвращаем input для render
     }
@@ -453,7 +458,7 @@ class Game {
         // --- Расчет цвета фона (используем this.player) ---
         let backgroundColor;
         if (this.player.isPredator) {
-             backgroundColor = 'rgb(100, 100, 100)'; // Серый фон для Хищника
+             backgroundColor = 'rgb(0, 0, 0)'; // Теперь черный
         } else {
             // Градиентный фон для Охотников
             const healthPercent = Math.max(0, Math.min(1, this.player.currentHealth / this.player.maxHealth));
@@ -476,7 +481,7 @@ class Game {
         this.ctx.translate(cameraX, cameraY);
         this.ctx.scale(this.zoom, this.zoom);
         // Рендерим все сущности из gameEngine (игроки, стены)
-        this.gameEngine.render(this.myPlayerId); // <-- Передаем ID своего игрока
+        this.gameEngine.render(this.myPlayerId, this.player.isPredator); // <-- Передаем роль игрока
         
         // --- Render UI (Ammo Count) - ВНУТРИ МАСШТАБИРУЕМОГО КОНТЕКСТА --- 
         if (this.player && !this.player.isPredator) { 
@@ -497,23 +502,51 @@ class Game {
         
         // --- Render Hunter FOV (для Хищника) --- 
         if (this.player && this.player.isPredator) {
-            console.log("[Render FOV Cones] Executing as Predator."); // Лог
             this.ctx.save();
             this.ctx.translate(cameraX, cameraY); // Используем те же значения камеры
             this.ctx.scale(this.zoom, this.zoom);
             
-            // Базовые параметры FOV Охотника (можно взять из Game или определить здесь)
-            const hunterBaseFovAngle = Math.PI / 2; // 90 градусов
-            const hunterBaseWorldViewRadius = 700; // Базовая дальность
-            
-            this.ctx.fillStyle = 'rgba(255, 255, 0, 0.15)'; // Полупрозрачный желтый
-            this.ctx.strokeStyle = 'rgba(255, 255, 0, 0.3)';
-            this.ctx.lineWidth = 1 / this.zoom; // Тонкая линия, не зависящая от зума
+            // Базовые параметры FOV Охотника
+            const hunterBaseFovAngle = Math.PI / 2; 
+            const hunterBaseWorldViewRadius = 700; 
 
             for (const id in this.playerEntities) {
                  const entity = this.playerEntities[id];
                  // Рисуем FOV только для других игроков-Охотников
                  if (id !== this.myPlayerId && !entity.isPredator) {
+                    // Рассчитываем цвет конуса на основе здоровья Охотника
+                    // --- Расчет цвета (КОПИЯ ЛОГИКИ ФОНА ОХОТНИКА) ---
+                    const healthPercent = Math.max(0, Math.min(1, entity.currentHealth / entity.maxHealth));
+                    const fullHealthColor = { r: 78, g: 87, b: 40 }; // Цвета как у фона
+                    const zeroHealthColor = { r: 120, g: 0, b: 0 }; 
+                    const r = Math.round(fullHealthColor.r + (zeroHealthColor.r - fullHealthColor.r) * (1 - healthPercent));
+                    const g = Math.round(fullHealthColor.g + (zeroHealthColor.g - fullHealthColor.g) * (1 - healthPercent));
+                    const b = Math.round(fullHealthColor.b + (zeroHealthColor.b - fullHealthColor.b) * (1 - healthPercent));
+                    /* Старая логика цвета
+                    let r, g, b;
+                    if (healthPercent > 0.5) { // От зеленого к желтому
+                        r = Math.round(255 * 2 * (1 - healthPercent));
+                        g = 255;
+                        b = 0;
+                    } else { // От желтого к красному
+                        r = 255;
+                        g = Math.round(255 * 2 * healthPercent);
+                        b = 0;
+                    }
+                    */
+
+                    // --- Создание градиента (ИНВЕРТИРОВАН) ---
+                    const fovGradient = this.ctx.createRadialGradient(
+                        entity.x, entity.y, 0, // Центр градиента (начало)
+                        entity.x, entity.y, hunterBaseWorldViewRadius // Край градиента
+                    );
+                    // fovGradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.05)`); 
+                    // fovGradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.3)`);  
+                    fovGradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.3)`);  // Более насыщенный в центре
+                    fovGradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.05)`); // Почти прозрачный на краю
+
+                    this.ctx.fillStyle = fovGradient; // Используем градиент для заливки
+                     
                      const angle = entity.angle;
                      const fov = hunterBaseFovAngle; // Используем базовый FOV
                      const radius = hunterBaseWorldViewRadius; // Используем базовую дальность
@@ -522,8 +555,7 @@ class Game {
                      this.ctx.moveTo(entity.x, entity.y);
                      this.ctx.arc(entity.x, entity.y, radius, angle - fov / 2, angle + fov / 2);
                      this.ctx.closePath();
-                     this.ctx.fill();
-                     this.ctx.stroke();
+                     this.ctx.fill(); // Только заливка
                  }
             }
             this.ctx.restore();
@@ -659,8 +691,35 @@ class Game {
             if (effect.render) { effect.render(this.ctx); }
         });
         this.ctx.restore(); 
+        
+        // --- Render Player Names (только для Охотников) --- 
+        if (this.player && !this.player.isPredator) { // Рисуем имена, только если мы Охотник
+            this.ctx.save();
+            this.ctx.translate(cameraX, cameraY); // Используем те же смещения камеры
+            this.ctx.scale(this.zoom, this.zoom);  // и масштаб
 
-        // --- Render Crosshair (используем input.mouse, но в экранных координатах) ---
+            this.ctx.font = '12px Arial';
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'bottom';
+            this.ctx.shadowColor = 'black';
+            this.ctx.shadowBlur = 2;
+
+            for (const id in this.playerEntities) {
+                const entity = this.playerEntities[id];
+                // Рисуем имя для других игроков, если они не Хищники
+                if (id !== this.myPlayerId && entity.name && !entity.isPredator) {
+                    this.ctx.fillStyle = 'white'; // Белый цвет имени
+                    // Используем entity.radius (должен быть у Player) для расчета Y
+                    const nameY = entity.y - (entity.radius || entity.size / 2) - 5; 
+                    this.ctx.fillText(entity.name, entity.x, nameY); // Над спрайтом
+                }
+            }
+            this.ctx.restore();
+        }
+        // --- End Render Player Names --- 
+
+        // --- Render Crosshair (ЗАМЕНЕНО НИЖЕ) ---
+        /*
         if (input && input.rawMouseX !== undefined) {
             const crosshairRadius = this.currentCrosshairRadius; 
             const scaledRadius = crosshairRadius * this.zoom; 
@@ -670,19 +729,58 @@ class Game {
             this.ctx.arc(input.rawMouseX, input.rawMouseY, scaledRadius, 0, Math.PI * 2);
             this.ctx.stroke();
         }
+        */
         // --- End Custom Crosshair ---
 
         // --- Render UI --- 
         this.renderPlayerList(); // ВОЗВРАЩАЕМ список игроков справа
-        this.renderCrosshair(input); // Оставили только прицел
-    }
+        // this.renderCrosshair(input); // Оставили только прицел - ЗАМЕНЕНО
 
-    // Переименован метод для ясности
-    renderCrosshair(input) {
-        if (input && input.rawMouseX !== undefined) {
-             // ... (код отрисовки прицела) ...
-             this.ctx.stroke();
+        // --- РИСУЕМ КУРСОР (замена renderCrosshair) ---
+        if (this.player && input && input.rawMouseX !== undefined) {
+            // this.ctx.lineWidth = 1; // Толщина задается отдельно для каждого типа
+
+            if (!this.player.isPredator) {
+                // --- Курсор Охотника (круг) ---
+                this.ctx.lineWidth = 1; // Толщина 1
+                const crosshairRadius = this.currentCrosshairRadius; 
+                const scaledRadius = crosshairRadius * this.zoom; // Учитываем зум для размера
+                this.ctx.strokeStyle = '#ffffff'; 
+                this.ctx.beginPath();
+                // Рисуем в экранных координатах мыши
+                this.ctx.arc(input.rawMouseX, input.rawMouseY, scaledRadius, 0, Math.PI * 2);
+                this.ctx.stroke();
+            } else {
+                // --- Курсор Хищника (дуга) ---
+                this.ctx.lineWidth = 3; // Толщина 3
+                const attackRange = 50; // Дальность атаки (мировые единицы)
+                const arcAngle = Math.PI / 2; // Ширина дуги (90 градусов)
+                
+                // Вычисляем центр дуги в мировых координатах
+                const arcCenterXWorld = this.player.x + attackRange * Math.cos(this.player.angle);
+                const arcCenterYWorld = this.player.y + attackRange * Math.sin(this.player.angle);
+
+                // Переводим центр дуги в экранные координаты (с учетом камеры и зума)
+                // НУЖНЫ cameraX и cameraY из начала render()
+                const cameraX = this.canvas.width / 2 - this.player.x * this.zoom;
+                const cameraY = this.canvas.height / 2 - this.player.y * this.zoom;
+                const arcCenterXScreen = cameraX + arcCenterXWorld * this.zoom;
+                const arcCenterYScreen = cameraY + arcCenterYWorld * this.zoom;
+                
+                // Радиус дуги (для визуализации) - УВЕЛИЧЕН
+                const arcRadius = 25 * this.zoom; // Было 15
+
+                // Углы дуги (теперь вокруг направления взгляда) - ПОВЕРНУТО НА 90 ГРАДУСОВ ВЛЕВО
+                const startAngleArc = this.player.angle - arcAngle / 2;
+                const endAngleArc = this.player.angle + arcAngle / 2;
+
+                this.ctx.strokeStyle = '#ffffff'; // Белый цвет
+                this.ctx.beginPath();
+                this.ctx.arc(arcCenterXScreen, arcCenterYScreen, arcRadius, startAngleArc, endAngleArc);
+                this.ctx.stroke();
+            }
         }
+        // --- КОНЕЦ РИСОВАНИЯ КУРСОРА ---
     }
 
     // Метод для отрисовки списка игроков (снова используется)
