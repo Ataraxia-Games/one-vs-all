@@ -299,11 +299,34 @@ class Game {
     }
 
     resizeCanvas() {
-        this.canvas.width = window.innerWidth;
-        this.canvas.height = window.innerHeight;
-        // Also resize the offscreen fog canvas
+        // Закомментировано: получение высоты нижнего баннера
+        // const adContainer = document.getElementById('ad-container-bottom');
+        // const adHeight = adContainer ? adContainer.offsetHeight : 0;
+        
+        // Получаем ширину боковых баннеров
+        const leftAd = document.getElementById('ad-container-left');
+        const rightAd = document.getElementById('ad-container-right');
+        const leftAdWidth = leftAd ? leftAd.offsetWidth : 0;
+        const rightAdWidth = rightAd ? rightAd.offsetWidth : 0;
+
+        // Рассчитываем доступное пространство
+        const availableWidth = window.innerWidth - leftAdWidth - rightAdWidth;
+        const availableHeight = window.innerHeight;
+
+        // Выбираем меньшую сторону для квадрата
+        const squareSize = Math.floor(Math.min(availableWidth, availableHeight)); // Округляем вниз
+
+        // Устанавливаем размер канваса
+        this.canvas.width = squareSize;
+        this.canvas.height = squareSize; 
+        
+        // CSS (display: flex, justify-content: center на body) должен центрировать канвас
+        // Если центрирование не сработает, можно добавить margin: auto; для canvas в CSS
+
+        // Resize the offscreen fog canvas
         this.fogCanvas.width = this.canvas.width;
         this.fogCanvas.height = this.canvas.height;
+        console.log(`Canvas resized to square: ${this.canvas.width}x${this.canvas.height}`); 
     }
 
     // Новый метод для интерполяции сущностей (вызывается в gameLoop)
