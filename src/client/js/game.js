@@ -9,6 +9,60 @@ import { Bullet } from './entities/Bullet.js';
 // Убедитесь, что библиотека socket.io подключена в index.html
 // <script src="/socket.io/socket.io.js"></script>
 
+// --- Текст правил (Глава 2) ---
+const rulesTextChapter2 = `
+**Как играть:**
+
+**Цель Игры:** Игра идет, пока Хищника не убьют. Затем начинается заново.
+
+**За Хищника:**
+*   **Цель:** Выжить как можно дольше! Убивай Охотников.
+*   **Атака (ЛКМ):** Ближний бой. Дальность атаки "заряжается" после удара (курсор отодвигается).
+*   **Фазирование:** Проходи сквозь *внутренние* стены (не границы карты!).
+*   **Осторожно:** Если Охотники убьют друг друга, ты временно потеряешь фазирование!
+*   **Здоровье:** Ты становишься крепче, чем больше Охотников на сервере. Твой цвет показывает твое ХП.
+*   **Ложный след (ПКМ):** Создает эффект бега в точке курсора для отвлечения.
+
+**За Охотника:**
+*   **Цель:** Нанести **последний удар** Хищнику! Побеждает только добивший.
+*   **Стрельба (ЛКМ):** Бей Хищника. Патроны ограничены!
+*   **Прицел (ПКМ):** Возможно, сужает обзор для большей точности (?).
+*   **Другие Охотники:** Они конкуренты за финальный удар! Friendly Fire включен.
+*   **Тимкилл:** Убийство союзника временно ослабит Хищника (он перестанет проходить сквозь стены), но поможет ему выжить дольше.
+*   **Смерть:** Ты вернешься через время. Хочешь быстрее? Смотри рекламу!
+`;
+
+// --- Функция инициализации правил ---
+function initializeRulesDisplay() {
+    const rulesJoinElement = document.getElementById('rules-on-join-screen');
+    const rulesIngameElement = document.getElementById('rules-ingame-overlay');
+
+    if (rulesJoinElement) {
+        rulesJoinElement.textContent = rulesTextChapter2; // Используем textContent для сохранения форматирования из `
+    }
+    if (rulesIngameElement) {
+        rulesIngameElement.textContent = rulesTextChapter2;
+    }
+
+    // --- Слушатели для Tab --- 
+    window.addEventListener('keydown', (event) => {
+        if (event.key === 'Tab') {
+            event.preventDefault(); // Предотвращаем стандартное поведение Tab
+            if (rulesIngameElement) {
+                rulesIngameElement.style.display = 'block'; // Показываем оверлей
+            }
+        }
+    });
+
+    window.addEventListener('keyup', (event) => {
+        if (event.key === 'Tab') {
+            if (rulesIngameElement) {
+                rulesIngameElement.style.display = 'none'; // Скрываем оверлей
+            }
+        }
+    });
+}
+
 class Game {
     constructor() {
         this.canvas = document.getElementById('gameCanvas');
@@ -986,3 +1040,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 5000); 
     });
 }); 
+
+// Вызываем инициализацию правил при загрузке скрипта
+initializeRulesDisplay(); 

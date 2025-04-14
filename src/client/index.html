@@ -31,6 +31,7 @@
             text-align: center;
             color: white;
             z-index: 10; /* Чтобы было поверх канваса, если он вдруг виден */
+            
         }
         #join-ui h2 {
              margin-top: 0;
@@ -106,7 +107,36 @@
             font-size: 12px;
             z-index: 20; 
         }
-        */
+        */    /* Базовые стили для блоков с правилами */
+    .rules-display {
+        margin-top: 15px;
+        padding: 10px;
+        background-color: rgba(0, 0, 0, 0.5); /* Полупрозрачный фон */
+        color: #eee;
+        font-size: 0.9em;
+        border-radius: 5px;
+        max-width: 400px; /* Ограничим ширину */
+        text-align: left;
+        line-height: 1.4;
+        white-space: pre-wrap; /* Сохраняем переносы строк из текста */
+    }
+
+    /* Стили для оверлея по Tab */
+    .rules-overlay {
+        position: fixed; /* Или absolute, если внутри родителя с position: relative */
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%); /* Центрирование */
+        background-color: rgba(20, 20, 20, 0.9); /* Более плотный фон */
+        border: 1px solid #555;
+        z-index: 100; /* Поверх канваса */
+        padding: 20px;
+        max-width: 500px;
+        max-height: 80vh; /* Ограничим высоту */
+        overflow-y: auto; /* Добавим прокрутку, если текст не влезает */
+    }
+
+    /* Скрыть стандартный курсор на канвасе, если еще не сделано */
     </style>
 </head>
 <body>
@@ -120,11 +150,17 @@
         <h2>Введите ваше имя:</h2>
         <input type="text" id="playerNameInput" placeholder="Имя игрока" maxlength="16"/>
         <button id="joinButton">Присоединиться</button>
+        <div id="rules-on-join-screen" class="rules-display">
+            Загрузка правил...
+        </div> 
         <p id="joinError" style="color: red; display: none;"></p>
     </div>
     
     <!-- Игровой холст -->
     <canvas id="gameCanvas"></canvas>
+    <div id="rules-ingame-overlay" class="rules-display rules-overlay" style="display: none;">
+        Загрузка правил...
+   </div>
     
     <!-- Контейнер для правого баннера -->
     <div id="ad-container-right" class="ad-container-side">
