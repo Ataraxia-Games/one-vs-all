@@ -242,6 +242,28 @@ class Game {
             this.handleDisconnectionOrDeath("Отключен от сервера");
         });
 
+        // --- Обработчик ошибки входа (например, имя занято) ---
+        this.socket.on('joinError', (data) => {
+            console.error("Join Error Received:", data.message);
+            const joinErrorElement = document.getElementById('joinError');
+            const nameInput = document.getElementById('playerNameInput');
+            const joinButton = document.getElementById('joinButton');
+
+            if (joinErrorElement) {
+                joinErrorElement.textContent = data.message || "Ошибка входа";
+                joinErrorElement.style.display = 'block';
+            }
+            // Разблокируем UI
+            if (nameInput) nameInput.disabled = false;
+            if (joinButton) {
+                joinButton.disabled = false;
+                joinButton.textContent = 'Присоединиться';
+            }
+            // Можно добавить фокус обратно на поле ввода
+             if (nameInput) nameInput.focus(); 
+            // НЕ отключаем сокет здесь, позволяем пользователю исправить
+        });
+
         // --- НОВЫЙ ОБРАБОТЧИК СОЗДАНИЯ ЭФФЕКТОВ ---
         this.socket.on('createEffect', (data) => {
             if (data && data.type === 'speedCircle') {

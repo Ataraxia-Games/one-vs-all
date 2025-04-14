@@ -222,10 +222,10 @@ const playerRadius = 15;
 const hunterBaseHealth = 100; // Базовое здоровье Охотника
 const BASE_PREDATOR_HEALTH = 100; // Базовое здоровье Хищника
 const HEALTH_PER_HUNTER = 50;   // Доп. здоровье за каждого Охотника
-const shootCooldown = 500; // Кулдаун выстрела в мс
-const bulletSpeed = 600; // Скорость пули (пикс/сек)
-const bulletLifetime = 1000; // Время жизни пули в мс
-const shotgunPellets = 7; // Кол-во дробинок
+const shootCooldown = 500; 
+const bulletSpeed = 900; // Новая скорость (600 * 1.5)
+const bulletLifetime = 1000; 
+const shotgunPellets = 7; 
 const shotgunSpread = Math.PI / 12; // Разброс дроби
 const bulletRadius = 2; // Добавим радиус пули для столкновений
 const bulletDamage = 10; // Урон от пули
@@ -242,10 +242,26 @@ io.on('connection', (socket) => {
     // НЕ СОЗДАЕМ игрока здесь, ждем 'joinGame'
 
     socket.on('joinGame', (data) => {
-        const playerName = data.name ? String(data.name).trim().slice(0, 16) : `Player_${socket.id.slice(0, 4)}`; // Ограничиваем имя
+        const playerName = data.name ? String(data.name).trim().slice(0, 16) : `Player_${socket.id.slice(0, 4)}`;
         console.log(`Player ${socket.id} trying to join as "${playerName}"`);
 
-        // TODO: Проверка, не занято ли имя?
+        // --- Проверка на уникальность имени --- 
+        const lowerCaseName = playerName.toLowerCase();
+        let nameTaken = false;
+        for (const playerId in players) {
+            if (players[playerId].name.toLowerCase() === lowerCaseName) {
+                nameTaken = true;
+                break;
+            }
+        }
+
+        if (nameTaken) {
+            console.log(`Join attempt failed: Name "${playerName}" is already taken.`);
+            socket.emit('joinError', { message: 'Это имя уже занято!' });
+            // Не отключаем сокет сразу, даем клиенту обработать ошибку
+            return; // Прерываем обработку joinGame
+        }
+        // --- Конец проверки имени ---
 
         // Назначаем роль Хищника первому игроку
         let isPredator = false;
