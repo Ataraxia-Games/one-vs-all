@@ -312,14 +312,21 @@ io.on('connection', (socket) => {
 function updatePlayer(player, dt) {
     if (!player || !player.input) return;
 
-    // Расчет смещения 
+    // Определяем текущую скорость с учетом спринта
+    let currentSpeed = playerSpeed; // Базовая скорость
+    const sprintMultiplier = 1.8; // Множитель скорости спринта
+    if (player.input.isShiftDown) { 
+        currentSpeed *= sprintMultiplier; 
+    }
+
+    // Расчет смещения с использованием currentSpeed
     let deltaX = 0;
     let deltaY = 0;
     const keys = player.input.keys || {}; 
-    if (keys.w) deltaY -= playerSpeed * dt;
-    if (keys.s) deltaY += playerSpeed * dt;
-    if (keys.a) deltaX -= playerSpeed * dt;
-    if (keys.d) deltaX += playerSpeed * dt;
+    if (keys.w) deltaY -= currentSpeed * dt; // Используем currentSpeed
+    if (keys.s) deltaY += currentSpeed * dt; // Используем currentSpeed
+    if (keys.a) deltaX -= currentSpeed * dt; // Используем currentSpeed
+    if (keys.d) deltaX += currentSpeed * dt; // Используем currentSpeed
 
     // Нормализация диагонали
     if (deltaX !== 0 && deltaY !== 0) {
