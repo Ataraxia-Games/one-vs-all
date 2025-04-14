@@ -24,13 +24,14 @@ class Game {
         this.gameEngine = new GameEngine(this.ctx);
         this.inputHandler = new InputHandler();
         
-        // --- Сетевое состояние --- 
+        // --- Сетевое состояние (инициализируется позже) --- 
         this.socket = null; 
         this.myPlayerId = null;
-        this.myName = ""; // Сохраняем свое имя
-        this.players = {}; // Состояние игроков от сервера { id: { x, y, ..., name, health, isSprinting }, ... }
-        this.playerEntities = {}; // Локальные сущности для рендеринга игроков
-        this.bulletEntities = {}; // <-- Локальные сущности пуль
+        this.myName = ""; 
+        // Добавляем isPredator в структуру players и playerEntities
+        this.players = {}; // { id: { ..., name, health, ammo, isSprinting, isPredator }, ... }
+        this.playerEntities = {}; // { id: PlayerEntity { ..., isPredator, getCorners()?, ... } }
+        this.bulletEntities = {}; 
 
         // Zoom properties
         this.zoom = 1.0;
@@ -99,9 +100,9 @@ class Game {
 
         this.socket.on('init', (data) => {
             console.log('Initialization data received:', data);
-            if (data.id) { // Успешная инициализация
+            if (data.id) { 
                 this.myPlayerId = data.id;
-                this.players = data.players; // Теперь содержит name и health
+                this.players = data.players; // Теперь содержит isPredator
                 this.gameEngine.clearWalls(); 
                 if (data.walls && Array.isArray(data.walls)) {
                     data.walls.forEach(wallData => {
@@ -120,8 +121,8 @@ class Game {
                 } else {
                     console.warn("No walls data received from server or data is invalid.");
                 }
-                this.syncPlayerEntities();
-                this.initializeGameInternal(); // <<-- Запускаем игру и UI здесь
+                this.syncPlayerEntities(); // Передаст isPredator в сущности
+                this.initializeGameInternal();
             } else if (data.error) { // Обработка ошибки (например, имя занято)
                 console.error("Join error:", data.error);
                 document.getElementById('joinError').textContent = data.error;
@@ -132,8 +133,8 @@ class Game {
         });
 
         this.socket.on('gameStateUpdate', (gameState) => {
-            if (!this.myPlayerId) return; // Не обрабатываем до инициализации
-            // Обновляем игроков (включая name, health)
+            if (!this.myPlayerId) return; 
+            // Обновляем игроков (включая isPredator)
             if (gameState.players) {
                 gameState.players.forEach(serverPlayer => {
                     if (this.players[serverPlayer.id]) {
@@ -147,14 +148,14 @@ class Game {
             if (gameState.bullets) {
                 this.syncBulletEntities(gameState.bullets);
             }
-             this.syncPlayerEntities(); 
+             this.syncPlayerEntities(); // Обновит isPredator в сущностях
         });
         
         this.socket.on('playerConnected', (playerData) => {
             if (!this.myPlayerId) return;
-            console.log('Player connected:', playerData.id, playerData.name);
-            this.players[playerData.id] = playerData; // Добавляем нового игрока
-            this.syncPlayerEntities(); 
+            console.log('Player connected:', playerData.id, playerData.name, `Predator: ${playerData.isPredator}`);
+            this.players[playerData.id] = playerData; // Добавляем со всеми полями
+            this.syncPlayerEntities(); // Создаст сущность с isPredator
         });
 
         this.socket.on('playerDisconnected', (playerId) => {
@@ -177,26 +178,32 @@ class Game {
 
     // Синхронизирует локальные сущности с серверным состоянием players
     syncPlayerEntities() {
-         // Удаляем сущности для отключившихся игроков
+        const serverPlayerIds = new Set(Object.keys(this.players));
+
+        // 1. Удаляем локальные сущности отсутствующих игроков
         for (const localId in this.playerEntities) {
-            if (!this.players[localId]) {
+            if (!serverPlayerIds.has(localId)) {
                 this.gameEngine.removeEntity(this.playerEntities[localId]);
                 delete this.playerEntities[localId];
             }
         }
-         // Создаем/обновляем сущности для текущих игроков
+
+        // 2. Создаем/обновляем локальные сущности
         for (const serverId in this.players) {
              const serverData = this.players[serverId];
              const isSprintingFromServer = serverData.isSprinting || false;
+             const isPredatorFromServer = serverData.isPredator || false; // Получаем флаг
 
              if (!this.playerEntities[serverId]) {
                  // Создаем новую сущность Player 
-                 const playerEntity = new Player(serverData.x, serverData.y); 
-                 playerEntity.id = serverId; 
-                 playerEntity.color = serverData.color; 
+                 const playerEntity = new Player(serverData.x, serverData.y);
+                 playerEntity.id = serverId;
+                 playerEntity.name = serverData.name; // Сохраняем имя (может пригодиться)
+                 playerEntity.isPredator = isPredatorFromServer; // <-- Сохраняем роль
+                 playerEntity.color = serverData.color;
                  playerEntity.currentHealth = serverData.health !== undefined ? serverData.health : playerEntity.maxHealth;
-                 playerEntity.ammo = serverData.ammo !== undefined ? serverData.ammo : playerEntity.ammo; 
-                 playerEntity.isSprinting = isSprintingFromServer; // Сохраняем флаг спринта
+                 playerEntity.ammo = serverData.ammo !== undefined ? serverData.ammo : playerEntity.ammo;
+                 playerEntity.isSprinting = isSprintingFromServer;
 
                  // Привязываем обработчик кругов ВСЕМ игрокам
                  playerEntity.onSpeedCircle = (x, y) => {
@@ -223,7 +230,9 @@ class Game {
              } else {
                  // Обновляем существующую сущность
                  const localEntity = this.playerEntities[serverId];
-                 localEntity.isSprinting = isSprintingFromServer; // Обновляем флаг спринта
+                 localEntity.isSprinting = isSprintingFromServer;
+                 localEntity.isPredator = isPredatorFromServer; // <-- Обновляем роль
+                 localEntity.name = serverData.name;
 
                  if (serverId !== this.myPlayerId) {
                      // Обновляем цель для интерполяции
@@ -240,17 +249,12 @@ class Game {
                  localEntity.ammo = serverData.ammo !== undefined ? serverData.ammo : localEntity.ammo; 
              }
          }
-         // Убедимся, что ссылка this.player указывает на нашу сущность
+         // Обновляем ссылку this.player, УЧИТЫВАЯ РОЛЬ
          if (this.myPlayerId && this.playerEntities[this.myPlayerId]) {
              this.player = this.playerEntities[this.myPlayerId];
-              // Привязываем обработчик кругов здесь, после создания сущности
-             if (!this.player.onSpeedCircle) { // Если еще не привязан
-                this.player.onSpeedCircle = (x, y) => {
-                    this.gameEngine.addEffect(new SpeedCircle(x, y));
-                };
-             }
+             console.log(`Local player entity set. Is Predator: ${this.player.isPredator}`); // Отладка
          } else {
-             this.player = null; // Если нашей сущности еще нет
+             this.player = null;
          }
     }
 
@@ -482,18 +486,32 @@ class Game {
         this.fogCtx.fillRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
         const playerScreenX = this.fogCanvas.width / 2;
         const playerScreenY = this.fogCanvas.height / 2;
-        const numRays = 120; 
+        const numRays = 120;
         const fovAngle = this.currentFovAngle; 
         const worldViewRadius = this.currentWorldViewRadius; 
         const angleStep = fovAngle / numRays;
         const startAngle = this.player.angle - fovAngle / 2;
         const visibilityPoints = []; 
+
+        // Находим сущность Хищника (если мы Охотник)
+        let predatorEntity = null;
+        if (this.player && !this.player.isPredator) { // Если мы - Охотник
+            for (const id in this.playerEntities) {
+                if (this.playerEntities[id].isPredator) {
+                    predatorEntity = this.playerEntities[id];
+                    break;
+                }
+            }
+        }
+
         for (let i = 0; i <= numRays; i++) {
             const currentAngle = startAngle + i * angleStep;
             const rayEndXWorld = this.player.x + worldViewRadius * Math.cos(currentAngle);
             const rayEndYWorld = this.player.y + worldViewRadius * Math.sin(currentAngle);
             let closestHit = null;
             let minHitDistSq = worldViewRadius * worldViewRadius;
+
+            // 1. Проверка пересечения со стенами
             for (const wall of this.gameEngine.walls) {
                 for (let j = 0; j < wall.corners.length; j++) {
                     const corner1 = wall.corners[j];
@@ -507,6 +525,24 @@ class Game {
                     }
                 }
             }
+
+            // 2. Проверка пересечения с Хищником (только для Охотников)
+            if (predatorEntity && predatorEntity.getCorners) { // Если мы Охотник и Хищник найден
+                const predatorCorners = predatorEntity.getCorners();
+                for (let j = 0; j < predatorCorners.length; j++) {
+                    const corner1 = predatorCorners[j];
+                    const corner2 = predatorCorners[(j + 1) % predatorCorners.length]; // Замыкаем квадрат
+                    const hit = intersectSegments(this.player.x, this.player.y, rayEndXWorld, rayEndYWorld, corner1.x, corner1.y, corner2.x, corner2.y );
+                    if (hit) {
+                        const dx = hit.x - this.player.x;
+                        const dy = hit.y - this.player.y;
+                        const distSq = dx * dx + dy * dy;
+                        if (distSq < minHitDistSq) { minHitDistSq = distSq; closestHit = hit; }
+                    }
+                }
+            }
+
+            // Определяем конечную точку луча
             let finalPointWorldX, finalPointWorldY;
             if (closestHit) { finalPointWorldX = closestHit.x; finalPointWorldY = closestHit.y; }
             else { finalPointWorldX = rayEndXWorld; finalPointWorldY = rayEndYWorld; }
@@ -514,6 +550,7 @@ class Game {
             const finalPointScreenY = playerScreenY + (finalPointWorldY - this.player.y) * this.zoom;
             visibilityPoints.push({ x: finalPointScreenX, y: finalPointScreenY });
         }
+
         if (visibilityPoints.length > 0) {
             this.fogCtx.beginPath(); this.fogCtx.moveTo(playerScreenX, playerScreenY); visibilityPoints.forEach(p => this.fogCtx.lineTo(p.x, p.y)); this.fogCtx.closePath();
             const screenViewRadius = this.currentWorldViewRadius * this.zoom;

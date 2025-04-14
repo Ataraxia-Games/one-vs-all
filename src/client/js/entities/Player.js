@@ -27,6 +27,8 @@ export class Player {
         this.currentHealth = this.maxHealth; // Начинаем со 100% здоровья
         this.id = null; // Будет установлен из Game
         this.color = '#000'; // Черный цвет по умолчанию (сервер может прислать другой)
+        this.isPredator = false; // Добавляем флаг по умолчанию
+        this.name = ""; // Добавляем имя по умолчанию
     }
 
     update(deltaTime, input, walls) {
@@ -74,17 +76,47 @@ export class Player {
     }
     */
 
+    // Новый метод для расчета углов квадрата (для Хищника)
+    getCorners() {
+        const halfSize = this.radius; // Используем радиус как половину стороны
+        const cosAngle = Math.cos(this.angle);
+        const sinAngle = Math.sin(this.angle);
+
+        // Векторы к углам от центра (повернутые вектора полудиагоналей)
+        const cornerVecX1 = (halfSize * cosAngle - halfSize * sinAngle); // x для Угла 1 (например, верхний правый)
+        const cornerVecY1 = (halfSize * sinAngle + halfSize * cosAngle); // y для Угла 1
+        const cornerVecX2 = (-halfSize * cosAngle - halfSize * sinAngle); // x для Угла 2 (верхний левый)
+        const cornerVecY2 = (-halfSize * sinAngle + halfSize * cosAngle); // y для Угла 2
+
+        // Возвращаем массив углов в мировых координатах
+        return [
+            { x: this.x + cornerVecX1, y: this.y + cornerVecY1 }, // Угол 1
+            { x: this.x + cornerVecX2, y: this.y + cornerVecY2 }, // Угол 2
+            { x: this.x - cornerVecX1, y: this.y - cornerVecY1 }, // Угол 3 (противоп. Углу 1)
+            { x: this.x - cornerVecX2, y: this.y - cornerVecY2 }  // Угол 4 (противоп. Углу 2)
+        ];
+    }
+
     render(ctx) {
         ctx.save();
         ctx.translate(this.x, this.y);
-        // Вращаем для рендеринга (если нужно, но для круга не обязательно)
-        // ctx.rotate(this.angle); 
-
-        // Draw player body using this.color
-        ctx.fillStyle = this.color; // Используем цвет игрока
-        ctx.beginPath();
-        ctx.arc(0, 0, this.radius, 0, Math.PI * 2); 
-        ctx.fill();
+        
+        if (this.isPredator) {
+            // Рисуем квадрат Хищника
+            ctx.rotate(this.angle); // Поворачиваем контекст
+            const size = this.radius * 2; // Полный размер стороны
+            ctx.fillStyle = this.color; // Используем цвет игрока (черный)
+            // Рисуем квадрат с центром в (0, 0) повернутого контекста
+            ctx.fillRect(-size / 2, -size / 2, size, size);
+            // ctx.strokeStyle = 'red'; // Для отладки можно обвести
+            // ctx.strokeRect(-size / 2, -size / 2, size, size);
+        } else {
+            // Рисуем круг Охотника (как раньше)
+            ctx.fillStyle = this.color; 
+            ctx.beginPath();
+            ctx.arc(0, 0, this.radius, 0, Math.PI * 2); 
+            ctx.fill();
+        }
 
         // Draw Ammo Count (УБРАНО - теперь рисуется в Game.render)
         /*

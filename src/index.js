@@ -185,7 +185,7 @@ class MapGenerator {
 
 
 // -- Игровое состояние на сервере --
-const players = {}; // Теперь { socket.id: { id, x, y, ..., name, health, ammo, input, lastShotTime } }
+const players = {}; // { id: { ..., name, health, ammo, isPredator, ... } }
 const bullets = []; // <-- Массив для хранения активных пуль
 let nextBulletId = 0; // <-- Счетчик для уникальных ID пуль
 const worldWidth = 2000 * 1.3;
@@ -203,6 +203,7 @@ const shotgunPellets = 7; // Кол-во дробинок
 const shotgunSpread = Math.PI / 12; // Разброс дроби
 const bulletRadius = 2; // Добавим радиус пули для столкновений
 const bulletDamage = 10; // Урон от пули
+let predatorAssigned = false; // Флаг, что Хищник уже назначен
 
 io.on('connection', (socket) => {
     console.log(`A user connected: ${socket.id}`);
@@ -214,10 +215,19 @@ io.on('connection', (socket) => {
 
         // TODO: Проверка, не занято ли имя?
 
+        // Назначаем роль Хищника первому игроку
+        let isPredator = false;
+        if (!predatorAssigned) {
+            isPredator = true;
+            predatorAssigned = true;
+            console.log(`Player "${playerName}" (${socket.id}) is the PREDATOR!`);
+        }
+
         // Создаем игрока
         players[socket.id] = {
             id: socket.id,
             name: playerName,
+            isPredator: isPredator, // <-- Сохраняем роль
             x: worldWidth / 2 + (Math.random() - 0.5) * 100, 
             y: worldHeight / 2 + (Math.random() - 0.5) * 100,
             angle: 0,
@@ -300,7 +310,13 @@ io.on('connection', (socket) => {
         console.log(`User disconnected: ${socket.id}`);
         const player = players[socket.id];
         if (player) {
-            console.log(`Player "${player.name}" left.`);
+            console.log(`Player "${player.name}" (${socket.id}) left.`);
+            // Если отключается Хищник, сбрасываем флаг
+            if (player.isPredator) {
+                console.log("Predator disconnected! Resetting assignment.");
+                predatorAssigned = false;
+                // TODO: Возможно, нужна логика выбора нового Хищника или завершения раунда?
+            }
             delete players[socket.id];
             io.emit('playerDisconnected', socket.id); // Сообщаем всем ID отключившегося
             console.log(`Total players: ${Object.keys(players).length}`);
@@ -460,6 +476,7 @@ setInterval(() => {
             return {
                 id: p.id,
                 name: p.name,
+                isPredator: p.isPredator,
                 x: p.x,
                 y: p.y,
                 angle: p.angle,
