@@ -282,7 +282,10 @@ io.on('connection', (socket) => {
         let spawnX, spawnY;
         let attempts = 0;
         const maxSpawnAttempts = 100; // Предохранитель от бесконечного цикла
+        let collisionWithBoundary; // Объявляем переменную ЗДЕСЬ
+
         do {
+            collisionWithBoundary = false; // Сбрасываем флаг в начале итерации
             // Генерируем точку с отступом от краев мира
             spawnX = 100 + Math.random() * (worldWidth - 200);
             spawnY = 100 + Math.random() * (worldHeight - 200);
@@ -293,7 +296,18 @@ io.on('connection', (socket) => {
                 spawnY = worldHeight / 2;
                 break;
             }
-        } while (!isPointInsidePolygon({ x: spawnX, y: spawnY }, boundaryVertices));
+            // --- Дополнительная проверка: не спавнимся ВНУТРИ граничной стены ---
+            for (const wall of serverWalls) {
+                if (wall.isBoundary) {
+                    if (checkCircleWallCollision({ x: spawnX, y: spawnY, radius: playerRadius }, wall).collided) {
+                        collisionWithBoundary = true;
+                        break; // Достаточно одного столкновения с границей
+                    }
+                }
+            }
+            // Продолжаем цикл, если точка НЕ внутри полигона ИЛИ есть столкновение с границей
+        } while (!isPointInsidePolygon({ x: spawnX, y: spawnY }, boundaryVertices) || collisionWithBoundary);
+
         console.log(`Spawn point found after ${attempts} attempts: (${spawnX.toFixed(0)}, ${spawnY.toFixed(0)})`);
         // --- Конец генерации точки спавна ---
 
