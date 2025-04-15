@@ -139,7 +139,7 @@ class Game {
     // Вызывается после ввода имени
     connectAndJoin(playerName) {
         this.myName = playerName;
-        console.log(`Attempting to join as ${this.myName}`);
+        // console.log(`Attempting to join as ${this.myName}`);
         this.socket = io(); // Устанавливаем соединение
         this.setupSocketListeners(); // Настраиваем слушатели
 
@@ -151,7 +151,7 @@ class Game {
 
     // Инициализация игры и UI после получения 'init' от сервера
     initializeGameInternal() {
-        console.log("Initializing game internally after server ack.");
+        // console.log("Initializing game internally after server ack.");
         this.initGame(); // Локальная инициализация (если нужна)
         this.resizeCanvas();
         window.addEventListener('resize', () => this.resizeCanvas());
@@ -168,11 +168,11 @@ class Game {
 
         this.socket.on('connect', () => {
             // Не выводим ID здесь, он придет в 'init'
-            console.log('Socket connected...'); 
+            console.log('Socket connected...'); // <-- ОСТАВЛЯЕМ
         });
 
         this.socket.on('init', (data) => {
-            console.log('Initialization data received:', data);
+            // console.log('Initialization data received:', data);
             if (data.id) { 
                 this.myPlayerId = data.id;
                 this.players = data.players; // Теперь содержит isPredator
@@ -190,14 +190,14 @@ class Game {
                         );
                         this.gameEngine.addEntity(wall); 
                     });
-                    console.log(`Added ${data.walls.length} walls from server.`);
+                    // console.log(`Added ${data.walls.length} walls from server.`);
                 } else {
-                    console.warn("No walls data received from server or data is invalid.");
+                    console.warn("No walls data received from server or data is invalid."); // <-- ОСТАВЛЯЕМ
                 }
                 this.syncPlayerEntities(); // Передаст isPredator в сущности
                 this.initializeGameInternal();
             } else if (data.error) { // Обработка ошибки (например, имя занято)
-                console.error("Join error:", data.error);
+                console.error("Join error:", data.error); // <-- ОСТАВЛЯЕМ
                 document.getElementById('joinError').textContent = data.error;
                 document.getElementById('joinError').style.display = 'block';
                 this.socket.disconnect(); // Отключаемся
@@ -237,17 +237,17 @@ class Game {
         
         this.socket.on('playerConnected', (playerData) => {
             if (!this.myPlayerId) return;
-            console.log('Player connected:', playerData.id, playerData.name, `Predator: ${playerData.isPredator}`);
+            console.log('Player connected:', playerData.id, playerData.name, `Predator: ${playerData.isPredator}`); // <-- ОСТАВЛЯЕМ
             this.players[playerData.id] = playerData; // Добавляем со всеми полями
             this.syncPlayerEntities(); // Создаст сущность с isPredator
         });
 
         this.socket.on('playerDisconnected', (playerId) => {
              if (!this.myPlayerId) return;
-            console.log('Player disconnected:', playerId);
+            console.log('Player disconnected:', playerId); // <-- ОСТАВЛЯЕМ
              // Удаляем из players
             if (this.players[playerId]) {
-                 console.log(`Removing player ${this.players[playerId].name} from list.`);
+                 // console.log(`Removing player ${this.players[playerId].name} from list.`);
                  delete this.players[playerId];
              }
              // Удаляем сущность
@@ -259,13 +259,13 @@ class Game {
         
         // TODO: Добавить обработчик 'disconnect' для возврата к экрану входа
         this.socket.on('disconnect', (reason) => {
-            console.warn(`Disconnected from server: ${reason}`);
+            console.warn(`Disconnected from server: ${reason}`); // <-- ОСТАВЛЯЕМ
             this.handleDisconnectionOrDeath("Отключен от сервера");
         });
 
         // --- Обработчик ошибки входа (например, имя занято) ---
         this.socket.on('joinError', (data) => {
-            console.error("Join Error Received:", data.message);
+            console.error("Join Error Received:", data.message); // <-- ОСТАВЛЯЕМ
             const joinErrorElement = document.getElementById('joinError');
             const nameInput = document.getElementById('playerNameInput');
             const joinButton = document.getElementById('joinButton');
@@ -296,7 +296,7 @@ class Game {
         this.socket.on('bonusCollected', (bonusId) => {
             const bonusEntity = this.bonusEntities[bonusId];
             if (bonusEntity) {
-                console.log(`[Bonus Client] Removing collected bonus ${bonusId}`);
+                // console.log(`[Bonus Client] Removing collected bonus ${bonusId}`);
                 this.gameEngine.removeEntity(bonusEntity); // Удаляем из движка
                 delete this.bonusEntities[bonusId];
             }
@@ -341,18 +341,12 @@ class Game {
                  playerEntity.maxAmmo = serverData.maxAmmo;
                  playerEntity.name = serverData.name || ""; // Сохраняем имя
 
-                 // Привязываем обработчик кругов ВСЕМ игрокам
-                 // playerEntity.onSpeedCircle = (x, y) => {
-                 //     this.gameEngine.addEffect(new SpeedCircle(x, y));
-                 // };
-
                  // --- Инициализация кулдауна эффекта скорости для ВСЕХ --- 
                  playerEntity.lastSpeedCircleTime = 0;
                  playerEntity.speedCircleCooldown = 200; // Можно настроить (ms)
 
                  if (serverId === this.myPlayerId) {
                      playerEntity.isSelf = true; 
-                     // Локальный игрок использует свою логику tryGenerateSpeedCircle из Player.js
                  } else {
                      playerEntity.isSelf = false;
                      playerEntity.update = () => {}; // Отключаем update для других
@@ -363,7 +357,7 @@ class Game {
                  }
                  this.playerEntities[serverId] = playerEntity;
                  this.gameEngine.addEntity(playerEntity);
-                 console.log(`Created entity for ${serverId}`);
+                 // console.log(`Created entity for ${serverId}`);
              } else {
                  // Обновляем существующую сущность
                  const localEntity = this.playerEntities[serverId];
@@ -390,7 +384,7 @@ class Game {
          // Обновляем ссылку this.player, УЧИТЫВАЯ РОЛЬ
          if (this.myPlayerId && this.playerEntities[this.myPlayerId]) {
              this.player = this.playerEntities[this.myPlayerId];
-             console.log(`Local player entity set. Is Predator: ${this.player.isPredator}`); // Отладка
+             // console.log(`Local player entity set. Is Predator: ${this.player.isPredator}`); // Отладка
          } else {
              this.player = null;
          }
@@ -460,11 +454,8 @@ class Game {
 
     initGame() {
         // НЕ создаем игрока здесь, ждем 'init' от сервера
-        console.log("Initializing game locally...");
+        console.log("Initializing game locally..."); // <-- МОЖНО УДАЛИТЬ?
         // ГЕНЕРАЦИЯ СТЕН ПЕРЕНЕСЕНА: теперь стены приходят от сервера в 'init'
-        // const mapGenerator = new MapGenerator(this.worldWidth, this.worldHeight);
-        // const boundaryWalls = mapGenerator.getWalls();
-        // boundaryWalls.forEach(wall => { this.gameEngine.addEntity(wall); });
     }
 
     resizeCanvas() {
@@ -490,16 +481,15 @@ class Game {
         this.canvas.height = squareSize; 
         
         // CSS (display: flex, justify-content: center на body) должен центрировать канвас
-        // Если центрирование не сработает, можно добавить margin: auto; для canvas в CSS
 
         // Resize the offscreen fog canvas
         this.fogCanvas.width = this.canvas.width;
         this.fogCanvas.height = this.canvas.height;
-        console.log(`Canvas resized to square: ${this.canvas.width}x${this.canvas.height}`); 
+        // console.log(`Canvas resized to square: ${this.canvas.width}x${this.canvas.height}`); 
 
         // Обновляем радиус статического тумана (например, 90% от половины высоты)
         this.staticFogViewRadiusPx = Math.floor(this.canvas.height * 0.45);
-        console.log(`Static Fog View Radius updated to: ${this.staticFogViewRadiusPx}px`);
+        // console.log(`Static Fog View Radius updated to: ${this.staticFogViewRadiusPx}px`);
     }
 
     // Новый метод для интерполяции сущностей (вызывается в gameLoop)
@@ -520,7 +510,6 @@ class Game {
                     while (entity.angle < -Math.PI) entity.angle += Math.PI * 2;
                 }
                 // --- Генерация кругов скорости УБРАНА ОТСЮДА ---
-                // if (entity.isSprinting && entity.onSpeedCircle) { ... }
             }
         }
     }
@@ -542,8 +531,6 @@ class Game {
         }
         this.interpolateEntities(); 
         this.render(input); 
-        
-        // requestAnimationFrame((time) => this.gameLoop(time)); // Перенесено в начало
     }
 
     update(deltaTime) {
@@ -578,12 +565,6 @@ class Game {
         const input = this.inputHandler.getInput(); 
 
         // --- Обновление Zoom, FOV, Crosshair (локально) ---
-        /* // --- Зум колесом отключен ---
-        if (input.wheelDelta !== 0) {
-            this.zoom -= input.wheelDelta * this.zoomSpeed;
-            this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom));
-        }
-        */ // --- Конец отключенного зума ---
 
         // --- Update Target FOV Radius & Angle based on RMB ---
         if (input.isRightMouseDown) {
@@ -654,7 +635,7 @@ class Game {
                     // Игрок достаточно близко
                     if (!bonus.isCollecting) {
                         // Начать сбор, если еще не начат
-                        console.log(`[Bonus Client] Starting collection for bonus ${bonus.id}`);
+                        // console.log(`[Bonus Client] Starting collection for bonus ${bonus.id}`);
                         bonus.isCollecting = true;
                         bonus.collectionProgress = 0;
                     }
@@ -662,7 +643,7 @@ class Game {
                      // Игрок НЕ близко
                     if (bonus.isCollecting && distanceSq > (collectDistance + cancelBuffer) * (collectDistance + cancelBuffer)) {
                          // Отменить сбор, если игрок отошел достаточно далеко
-                         console.log(`[Bonus Client] Canceled collection for bonus ${bonus.id} (too far)`);
+                         // console.log(`[Bonus Client] Canceled collection for bonus ${bonus.id} (too far)`);
                          bonus.isCollecting = false;
                          bonus.collectionProgress = 0;
                     }
@@ -673,7 +654,7 @@ class Game {
                     bonus.collectionProgress += deltaTime;
                     if (bonus.collectionProgress >= bonus.collectionDuration) {
                         // Сбор завершен, отправляем запрос на сервер
-                        console.log(`[Bonus Client] Collection complete for bonus ${bonus.id}. Sending request.`);
+                        // console.log(`[Bonus Client] Collection complete for bonus ${bonus.id}. Sending request.`);
                         this.socket.emit('collectBonusRequest', bonus.id);
                         // Сбрасываем локальное состояние, чтобы не спамить запросы
                         // Сервер пришлет 'bonusCollected' для удаления
@@ -706,8 +687,6 @@ class Game {
                 if (now - this.lastPredatorFakeTrailTime > this.predatorFakeTrailCooldown) {
                     // Отправляем событие на сервер вместо локального создания
                     this.socket.emit('predatorUsedFakeTrail', { x: input.mouse.x, y: input.mouse.y });
-                    // this.gameEngine.addEffect(new SpeedCircle(input.mouse.x, input.mouse.y)); // Старая логика
-                    // console.log(`Predator used Fake Trail ...`); // Удалено
                     this.lastPredatorFakeTrailTime = now; 
                 }
             }
@@ -720,7 +699,6 @@ class Game {
         if (!this.myPlayerId || !this.player) return; 
 
         // --- Добавим лог перед проверкой фона ---
-        // console.log(`[Render Start] Frame for ...`); // Удалено
 
         // --- Расчет цвета фона (используем this.player) ---
         let backgroundColor;
@@ -793,7 +771,7 @@ class Game {
                     const b = Math.round(fullHealthColor.b + (zeroHealthColor.b - fullHealthColor.b) * (1 - healthPercent));
                     
                     // --- Выбор параметров FOV на основе entity.isAiming ---
-                    const isAiming = entity.isAiming; // Получаем флаг от сервера (ПОКА НЕ РАБОТАЕТ БЕЗ ПРАВОК СЕРВЕРА)
+                    const isAiming = entity.isAiming; // Получаем флаг от сервера
                     const currentFovAngle = isAiming ? hunterNarrowFovAngle : hunterBaseFovAngle;
                     const currentRadius = isAiming ? hunterNarrowWorldViewRadius : hunterBaseWorldViewRadius;
 
@@ -867,7 +845,7 @@ class Game {
 
         // --- Render Fog of War (для Охотника) --- 
         if (this.player && !this.player.isPredator) {
-            console.log("[Render Fog] Executing as Hunter."); // Лог
+            // console.log("[Render Fog] Executing as Hunter."); // Лог
             this.fogCtx.clearRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
             this.fogCtx.fillStyle = 'rgba(0, 0, 0, 1)';
             this.fogCtx.fillRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
@@ -999,9 +977,6 @@ class Game {
             if (effect.render) { effect.render(this.ctx); }
         });
         this.ctx.restore(); 
-
-        // --- Render Radial Static Fog --- 
-        this.ctx.restore(); 
         // --- End Radial Static Fog (Canvas Version) ---
 
         // --- Render UI (Player List, Timer, Crosshair, Fullscreen Button) --- 
@@ -1009,7 +984,6 @@ class Game {
 
         // --- РИСУЕМ КУРСОР (замена renderCrosshair) ---
         if (this.player && input && input.rawMouseX !== undefined) {
-            // this.ctx.lineWidth = 1; // Толщина задается отдельно для каждого типа
 
             if (!this.player.isPredator) {
                 // --- Курсор Охотника (круг) ---
@@ -1024,7 +998,6 @@ class Game {
             } else {
                 // --- Курсор Хищника (ПОЛОСКА) ---
                 this.ctx.lineWidth = 3; // Толщина 3
-                // const attackRange = 50; // Старая константа
                 const currentAttackRange = this.predatorBaseAttackRange * this.predatorAttackCharge;
                 const cursorWidthAngle = Math.PI / 8; // Угол, определяющий ширину полоски (22.5 градуса в каждую сторону)
                 
@@ -1038,8 +1011,8 @@ class Game {
                 const pointRightYWorld = this.player.y + currentAttackRange * Math.sin(angleRight);
 
                 // Переводим в экранные координаты
-                const cameraX = this.canvas.width / 2 - this.player.x * this.zoom;
-                const cameraY = this.canvas.height / 2 - this.player.y * this.zoom;
+                // const cameraX = this.canvas.width / 2 - this.player.x * this.zoom; // Уже есть выше
+                // const cameraY = this.canvas.height / 2 - this.player.y * this.zoom;
                 const pointLeftXScreen = cameraX + pointLeftXWorld * this.zoom;
                 const pointLeftYScreen = cameraY + pointLeftYWorld * this.zoom;
                 const pointRightXScreen = cameraX + pointRightXWorld * this.zoom;
@@ -1144,7 +1117,7 @@ class Game {
 
     // Общая функция для обработки смерти или отключения
     handleDisconnectionOrDeath(reasonMessage = "Игра окончена") {
-        console.log(`Handling disconnection or death: ${reasonMessage}`);
+        // console.log(`Handling disconnection or death: ${reasonMessage}`);
 
         // 1. Остановить игровой цикл
         if (this.animationFrameId) {
@@ -1165,6 +1138,7 @@ class Game {
         this.players = {};
         this.playerEntities = {};
         this.bulletEntities = {};
+        this.bonusEntities = {}; // <-- Сбрасываем бонусы
         this.gameEngine.clearAllEntities(); // Очищаем движок
 
         // 4. Показать UI входа, скрыть канвас
@@ -1200,7 +1174,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const gameCanvas = document.getElementById('gameCanvas');
 
     if (!joinUi || !nameInput || !joinButton || !joinError || !gameCanvas) {
-        console.error("Required UI elements not found!");
+        console.error("Required UI elements not found!"); // <-- ОСТАВЛЯЕМ
         return;
     }
 
@@ -1242,10 +1216,6 @@ document.addEventListener('DOMContentLoaded', () => {
                  joinButton.disabled = false;
                  joinButton.textContent = 'Присоединиться';
                  // Ошибку покажет обработчик 'init' или 'joinError'
-                 // if (!joinError.textContent) { // Только если нет другой ошибки
-                 //     joinError.textContent = 'Не удалось подключиться к серверу.';
-                 //     joinError.style.display = 'block';
-                 // }
             }
         }, 5000); 
     });
@@ -1256,7 +1226,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fullscreenBtn.addEventListener('click', () => {
             if (!document.fullscreenElement) {
                 document.documentElement.requestFullscreen().catch(err => {
-                    console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+                    console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`); // <-- ОСТАВЛЯЕМ
                 });
             } else {
                 if (document.exitFullscreen) {

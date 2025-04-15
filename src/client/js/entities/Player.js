@@ -224,7 +224,7 @@ export class Player {
     takeDamage(amount) {
         this.currentHealth -= amount;
         this.currentHealth = Math.max(0, this.currentHealth); // Не уходим в минус
-        console.log(`Player ${this.id} took ${amount} damage, health: ${this.currentHealth}/${this.maxHealth}`);
+        // console.log(`Player ${this.id} took ${amount} damage, health: ${this.currentHealth}/${this.maxHealth}`);
         // TODO: Добавить эффект получения урона (например, мигание фона)
     }
 } 

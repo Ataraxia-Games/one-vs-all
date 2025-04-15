@@ -40,7 +40,7 @@ export class GameEngine {
         this.walls = [];
         this.bullets = [];
         this.effects = [];
-        console.log("Cleared all entities from GameEngine.");
+        // console.log("Cleared all entities from GameEngine."); // <-- ОСТАВЛЯЕМ?
     }
 
     removeEntity(entity) {
@@ -72,7 +72,7 @@ export class GameEngine {
         this.entities = this.entities.filter(entity => entity.constructor.name !== 'Wall');
         // Очищаем специализированный массив walls
         this.walls = [];
-        console.log("Cleared existing walls."); // Сообщение для отладки
+        // console.log("Cleared existing walls."); // Сообщение для отладки
     }
 
     update(deltaTime, input) {
