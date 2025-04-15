@@ -2,7 +2,7 @@ import { GameEngine } from './engine/GameEngine.js';
 import { Player } from './entities/Player.js';
 import { Wall } from './entities/Wall.js';
 import { InputHandler } from './input/InputHandler.js';
-import { intersectSegments } from './utils/geometry.js'; // Импортируем утилиту
+import { intersectSegments } from './utils/geometry.js';
 import { SpeedCircle } from './entities/SpeedCircle.js';
 import { Bullet } from './entities/Bullet.js';
 import { Bonus } from './entities/Bonus.js'; // <-- Импорт бонуса
@@ -776,8 +776,9 @@ class Game {
             // Параметры FOV Охотника (базовые и суженные)
             const hunterBaseFovAngle = Math.PI / 2; 
             const hunterBaseWorldViewRadius = 700; 
-            const hunterNarrowFovAngle = Math.PI / 4; // Суженный угол (45 градусов)
+            const hunterNarrowFovAngle = Math.PI / 3; // Суженный угол (60 градусов)
             const hunterNarrowWorldViewRadius = 1000; // Увеличенная дальность прицеливания
+            const numRays = 60; // Количество лучей для рейкастинга FOV
 
             for (const id in this.playerEntities) {
                  const entity = this.playerEntities[id];
@@ -806,13 +807,59 @@ class Game {
 
                     this.ctx.fillStyle = fovGradient; 
                      
-                     const angle = entity.angle;
-                     // Используем текущие параметры для отрисовки дуги
-                     this.ctx.beginPath();
-                     this.ctx.moveTo(entity.x, entity.y);
-                     this.ctx.arc(entity.x, entity.y, currentRadius, angle - currentFovAngle / 2, angle + currentFovAngle / 2);
-                     this.ctx.closePath();
-                     this.ctx.fill(); 
+                    // --- Рейкастинг для ограничения FOV стенами --- 
+                    const angle = entity.angle;
+                    const startAngle = angle - currentFovAngle / 2;
+                    const angleStep = currentFovAngle / numRays;
+                    const visibilityPoints = [];
+
+                    for (let i = 0; i <= numRays; i++) {
+                        const currentRayAngle = startAngle + i * angleStep;
+                        const rayEndXWorld = entity.x + currentRadius * Math.cos(currentRayAngle);
+                        const rayEndYWorld = entity.y + currentRadius * Math.sin(currentRayAngle);
+                        let closestHit = null;
+                        let minHitDistSq = currentRadius * currentRadius;
+
+                        // Проверка пересечения со стенами
+                        for (const wall of this.gameEngine.walls) {
+                            const corners = wall.getCorners ? wall.getCorners() : wall.corners;
+                            if (corners && corners.length > 1) {
+                                for (let j = 0; j < corners.length; j++) {
+                                    const corner1 = corners[j];
+                                    const corner2 = corners[(j + 1) % corners.length];
+                                    const hit = intersectSegments(entity.x, entity.y, rayEndXWorld, rayEndYWorld, corner1.x, corner1.y, corner2.x, corner2.y);
+                                    if (hit) {
+                                        const dxHit = hit.x - entity.x;
+                                        const dyHit = hit.y - entity.y;
+                                        const distSq = dxHit * dxHit + dyHit * dyHit;
+                                        if (distSq < minHitDistSq) {
+                                            minHitDistSq = distSq;
+                                            closestHit = hit;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Определяем конечную точку луча
+                        let finalPointWorldX, finalPointWorldY;
+                        if (closestHit) {
+                            finalPointWorldX = closestHit.x;
+                            finalPointWorldY = closestHit.y;
+                        } else {
+                            finalPointWorldX = rayEndXWorld;
+                            finalPointWorldY = rayEndYWorld;
+                        }
+                        visibilityPoints.push({ x: finalPointWorldX, y: finalPointWorldY });
+                    }
+
+                    // Рисуем полигон видимости вместо простого arc
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(entity.x, entity.y);
+                    visibilityPoints.forEach(p => this.ctx.lineTo(p.x, p.y));
+                    this.ctx.closePath();
+                    // Заливка остается прежней (fovGradient)
+                    this.ctx.fill(); 
                  }
             }
             this.ctx.restore();
@@ -826,7 +873,7 @@ class Game {
             this.fogCtx.fillRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
             const playerScreenX = this.fogCanvas.width / 2;
             const playerScreenY = this.fogCanvas.height / 2;
-            const numRays = 120;
+            const numRays = 120; // <-- ВОССТАНАВЛИВАЕМ numRays для Охотника
             const fovAngle = this.currentFovAngle; 
             const worldViewRadius = this.currentWorldViewRadius; 
             const angleStep = fovAngle / numRays;
