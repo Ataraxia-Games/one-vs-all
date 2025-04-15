@@ -210,7 +210,9 @@ class MapGenerator {
 // -- Игровое состояние на сервере --
 const players = {}; // { id: { ..., name, health, maxHealth, ammo, isPredator, ... } }
 const bullets = []; // <-- Массив для хранения активных пуль
+const bonuses = []; // <-- Массив для хранения активных бонусов { id, x, y }
 let nextBulletId = 0; // <-- Счетчик для уникальных ID пуль
+let nextBonusId = 0; // <-- Счетчик для уникальных ID бонусов
 const worldWidth = 2000 * 1.3;
 const worldHeight = 2000 * 1.3;
 // Генерируем стены ОДИН РАЗ при старте сервера
@@ -232,6 +234,12 @@ const bulletDamage = 10; // Урон от пули
 let predatorAssigned = false; // Флаг, что Хищник уже назначен
 const DAY_NIGHT_CYCLE_DURATION = 120 * 1000; // 2 минуты в мс
 let currentCycleTime = 0;
+let wasNight = true; // Флаг для отслеживания смены фазы
+
+// --- Константы для бонусов ---
+const BONUS_RADIUS = 15; // Такой же как у игрока?
+const BONUS_SPAWN_PADDING = 50; // Отступ от края мира для спавна
+const BONUS_WALL_BUFFER = BONUS_RADIUS + playerRadius + 10; // Буфер от стен (бонус + игрок + запас)
 
 // --- Хелпер-функция для расчета здоровья Хищника ---
 function calculatePredatorMaxHealth(numPlayers) {
@@ -486,6 +494,32 @@ io.on('connection', (socket) => {
     });
     // --- КОНЕЦ ОБРАБОТЧИКОВ ЭФФЕКТОВ ---
 
+    // --- Обработчик сбора бонуса --- 
+    socket.on('collectBonusRequest', (bonusId) => {
+        const player = players[socket.id];
+        // Ищем бонус по ID
+        const bonusIndex = bonuses.findIndex(b => b.id === bonusId);
+
+        if (!player || player.isPredator || bonusIndex === -1) {
+            // Игрок не найден, Хищник пытается собрать, или бонус уже собран/не существует
+            return; 
+        }
+
+        const bonus = bonuses[bonusIndex];
+        console.log(`[Bonus Collect] Player ${player.name} requests collection of bonus ${bonus.id}`);
+
+        // Выдаем награду (патроны)
+        const ammoGain = Math.floor(Math.random() * 4) + 2; // 2-5 патронов
+        player.ammo = Math.min(player.maxAmmo, player.ammo + ammoGain);
+        console.log(`[Bonus Collect] Player ${player.name} gained ${ammoGain} ammo. Current: ${player.ammo}/${player.maxAmmo}`);
+        
+        // Удаляем бонус из массива
+        bonuses.splice(bonusIndex, 1);
+
+        // Оповещаем всех клиентов, что бонус собран
+        io.emit('bonusCollected', bonusId);
+    });
+
     // Обработка отключения
     socket.on('disconnect', () => {
         console.log(`User disconnected: ${socket.id}`);
@@ -668,6 +702,78 @@ setInterval(() => {
     // Обновляем время цикла дня/ночи
     currentCycleTime = (currentCycleTime + TICK_RATE) % DAY_NIGHT_CYCLE_DURATION;
 
+    // --- Логика спавна бонусов при наступлении ночи --- 
+    const isNightNow = currentCycleTime < DAY_NIGHT_CYCLE_DURATION / 2;
+    if (!wasNight && isNightNow) { // Если только что наступила ночь
+        console.log("[Night Bonus Spawn] Night has begun. Checking bonuses...");
+        const numPlayers = Object.keys(players).length;
+        const bonusesToSpawn = Math.max(0, numPlayers - bonuses.length);
+        console.log(`Players: ${numPlayers}, Current Bonuses: ${bonuses.length}, Need to spawn: ${bonusesToSpawn}`);
+
+        if (bonusesToSpawn > 0) {
+            const boundaryVertices = mapGenerator.getBoundaryVertices();
+            let spawnedCount = 0;
+            let attemptsTotal = 0; // Защита от бесконечного цикла спавна
+            const maxSpawnTotalAttempts = bonusesToSpawn * 100; // Макс попыток на все бонусы
+
+            while (spawnedCount < bonusesToSpawn && attemptsTotal < maxSpawnTotalAttempts) {
+                let spawnX, spawnY;
+                let isValidSpawn = false;
+                let spawnAttempts = 0;
+                const maxSpawnPointAttempts = 50; // Макс попыток на ОДНУ точку
+
+                do {
+                    spawnAttempts++;
+                    attemptsTotal++;
+                    // Генерируем точку с отступом от краев
+                    spawnX = BONUS_SPAWN_PADDING + Math.random() * (worldWidth - 2 * BONUS_SPAWN_PADDING);
+                    spawnY = BONUS_SPAWN_PADDING + Math.random() * (worldHeight - 2 * BONUS_SPAWN_PADDING);
+                    
+                    // 1. Проверка внутри полигона
+                    if (!isPointInsidePolygon({ x: spawnX, y: spawnY }, boundaryVertices)) {
+                        continue; // Не внутри, следующая попытка
+                    }
+
+                    // 2. Проверка столкновения со ВСЕМИ стенами (с буфером)
+                    let collisionWithWall = false;
+                    for (const wall of serverWalls) {
+                        if (checkCircleWallCollision({ x: spawnX, y: spawnY, radius: BONUS_WALL_BUFFER }, wall).collided) {
+                            collisionWithWall = true;
+                            break;
+                        }
+                    }
+                    if (collisionWithWall) {
+                        continue; // Слишком близко к стене, следующая попытка
+                    }
+
+                    isValidSpawn = true; // Точка подходит
+
+                } while (!isValidSpawn && spawnAttempts < maxSpawnPointAttempts && attemptsTotal < maxSpawnTotalAttempts);
+
+                if (isValidSpawn) {
+                    const newBonus = {
+                        id: nextBonusId++,
+                        x: spawnX,
+                        y: spawnY
+                    };
+                    bonuses.push(newBonus);
+                    spawnedCount++;
+                    console.log(`[Night Bonus Spawn] Spawned bonus ${newBonus.id} at (${spawnX.toFixed(0)}, ${spawnY.toFixed(0)})`);
+                } else {
+                    console.warn(`[Night Bonus Spawn] Failed to find valid spawn point for a bonus after ${spawnAttempts} attempts.`);
+                    // Прерываем спавн, если не можем найти точку, чтобы не зациклиться
+                    if (attemptsTotal >= maxSpawnTotalAttempts) {
+                         console.error(`[Night Bonus Spawn] Reached max total attempts (${maxSpawnTotalAttempts}). Stopping bonus spawn for this cycle.`);
+                         break; 
+                    }
+                }
+            }
+        }
+    }
+    wasNight = isNightNow; // Обновляем флаг состояния ночи
+
+    // --- Конец логики спавна бонусов ---
+
     const gameState = {
         players: Object.values(players).map(p => {
             const input = p.input || {}; // Защита от undefined input
@@ -691,6 +797,7 @@ setInterval(() => {
             };
         }),
         bullets: Object.values(bullets).map(b => ({ id: b.id, x: b.x, y: b.y })),
+        bonuses: bonuses.map(b => ({ id: b.id, x: b.x, y: b.y })), // <-- Отправляем бонусы
         // --- Добавляем время цикла --- 
         cycleTime: currentCycleTime,
         cycleDuration: DAY_NIGHT_CYCLE_DURATION

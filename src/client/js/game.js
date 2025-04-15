@@ -5,6 +5,7 @@ import { InputHandler } from './input/InputHandler.js';
 import { intersectSegments } from './utils/geometry.js'; // Импортируем утилиту
 import { SpeedCircle } from './entities/SpeedCircle.js';
 import { Bullet } from './entities/Bullet.js';
+import { Bonus } from './entities/Bonus.js'; // <-- Импорт бонуса
 // Socket.io клиент
 // Убедитесь, что библиотека socket.io подключена в index.html
 // <script src="/socket.io/socket.io.js"></script>
@@ -86,6 +87,7 @@ class Game {
         this.players = {}; // { id: { ..., name, health, ammo, isSprinting, isPredator }, ... }
         this.playerEntities = {}; // { id: PlayerEntity { ..., isPredator, getCorners()?, ... } }
         this.bulletEntities = {}; 
+        this.bonusEntities = {}; // <-- Для хранения сущностей бонусов
 
         // Zoom properties
         this.zoom = 1.0;
@@ -227,6 +229,9 @@ class Game {
             if (gameState.cycleTime !== undefined) {
                 this.currentCycleTime = gameState.cycleTime;
             }
+
+            // --- Синхронизация бонусов ---
+            this.syncBonusEntities(gameState.bonuses || []);
         });
         
         this.socket.on('playerConnected', (playerData) => {
@@ -284,6 +289,16 @@ class Game {
             if (data && data.type === 'speedCircle') {
                 this.gameEngine.addEffect(new SpeedCircle(data.x, data.y));
             } // Можно добавить другие типы эффектов позже
+        });
+
+        // --- Обработчик собранного бонуса --- 
+        this.socket.on('bonusCollected', (bonusId) => {
+            const bonusEntity = this.bonusEntities[bonusId];
+            if (bonusEntity) {
+                console.log(`[Bonus Client] Removing collected bonus ${bonusId}`);
+                this.gameEngine.removeEntity(bonusEntity); // Удаляем из движка
+                delete this.bonusEntities[bonusId];
+            }
         });
     }
 
@@ -411,6 +426,37 @@ class Game {
         });
     }
 
+    // --- Синхронизация бонусов --- 
+    syncBonusEntities(serverBonuses) {
+        const serverBonusIds = new Set(serverBonuses.map(b => b.id));
+
+        // 1. Удаляем локальные бонусы, которых больше нет на сервере
+        for (const localId in this.bonusEntities) {
+            if (!serverBonusIds.has(parseInt(localId))) { 
+                const bonusEntity = this.bonusEntities[localId];
+                if (bonusEntity) {
+                    this.gameEngine.removeEntity(bonusEntity); 
+                }
+                delete this.bonusEntities[localId];
+            }
+        }
+
+        // 2. Создаем/обновляем локальные бонусы
+        serverBonuses.forEach(serverBonus => {
+            if (!this.bonusEntities[serverBonus.id]) {
+                // Создаем новую сущность Bonus
+                const bonusEntity = new Bonus(serverBonus.id, serverBonus.x, serverBonus.y);
+                this.bonusEntities[serverBonus.id] = bonusEntity;
+                this.gameEngine.addEntity(bonusEntity); // Добавляем в движок для рендеринга
+            } else {
+                // Обновляем существующую (только позицию, если вдруг нужно)
+                const localBonus = this.bonusEntities[serverBonus.id];
+                localBonus.x = serverBonus.x;
+                localBonus.y = serverBonus.y;
+            }
+        });
+    }
+
     initGame() {
         // НЕ создаем игрока здесь, ждем 'init' от сервера
         console.log("Initializing game locally...");
@@ -497,6 +543,9 @@ class Game {
 
     update(deltaTime) {
         if (!this.myPlayerId || !this.player) return {}; // Возвращаем пустой объект, если не готовы
+
+        // --- Константа радиуса бонуса (нужна для логики сбора) ---
+        const BONUS_RADIUS = 15; // Должна совпадать с серверной/Bonus.js
 
         // --- Обновление цикла дня/ночи (по серверным данным) --- 
         const cycleDuration = this.dayNightCycleDuration;
@@ -585,6 +634,51 @@ class Game {
             }
         }
         
+        // --- Логика сбора бонусов Охотником --- 
+        if (this.player && !this.player.isPredator) {
+            const collectDistance = this.player.radius + BONUS_RADIUS; // Дистанция начала сбора
+            const cancelBuffer = 15; // Буфер для отмены сбора при отходе
+
+            for (const bonusId in this.bonusEntities) {
+                const bonus = this.bonusEntities[bonusId];
+                const dx = this.player.x - bonus.x;
+                const dy = this.player.y - bonus.y;
+                const distanceSq = dx * dx + dy * dy;
+
+                if (distanceSq < collectDistance * collectDistance) {
+                    // Игрок достаточно близко
+                    if (!bonus.isCollecting) {
+                        // Начать сбор, если еще не начат
+                        console.log(`[Bonus Client] Starting collection for bonus ${bonus.id}`);
+                        bonus.isCollecting = true;
+                        bonus.collectionProgress = 0;
+                    }
+                } else {
+                     // Игрок НЕ близко
+                    if (bonus.isCollecting && distanceSq > (collectDistance + cancelBuffer) * (collectDistance + cancelBuffer)) {
+                         // Отменить сбор, если игрок отошел достаточно далеко
+                         console.log(`[Bonus Client] Canceled collection for bonus ${bonus.id} (too far)`);
+                         bonus.isCollecting = false;
+                         bonus.collectionProgress = 0;
+                    }
+                }
+
+                // Обновляем прогресс, если собираем
+                if (bonus.isCollecting) {
+                    bonus.collectionProgress += deltaTime;
+                    if (bonus.collectionProgress >= bonus.collectionDuration) {
+                        // Сбор завершен, отправляем запрос на сервер
+                        console.log(`[Bonus Client] Collection complete for bonus ${bonus.id}. Sending request.`);
+                        this.socket.emit('collectBonusRequest', bonus.id);
+                        // Сбрасываем локальное состояние, чтобы не спамить запросы
+                        // Сервер пришлет 'bonusCollected' для удаления
+                        bonus.isCollecting = false; 
+                        bonus.collectionProgress = 0;
+                    }
+                }
+            }
+        }
+
         // --- Обработка кликов мыши (отправка событий на сервер) ---
         if (input.isLeftMouseClick) {
             if (this.player && !this.player.isPredator) {
