@@ -138,6 +138,36 @@
     }
 
     /* Скрыть стандартный курсор на канвасе, если еще не сделано */
+        #day-night-timer {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            z-index: 100; /* Поверх канваса */
+        }
+        #fullscreen-btn {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(255, 255, 255, 0.5); /* Белый, 50% прозрачный */
+            background-color: transparent; /* Без заливки */
+            cursor: pointer;
+            padding: 0;
+            z-index: 100;
+            opacity: 0.5; /* Начальная прозрачность */
+            transition: opacity 0.2s ease-in-out;
+        }
+        #fullscreen-btn:hover {
+            opacity: 1.0; /* Полная непрозрачность при наведении */
+        }
     </style>
 </head>
 <body>
@@ -159,8 +189,14 @@
         <p id="joinError" style="color: red; display: none;"></p>
     </div>
     
+    <!-- Элемент для таймера дня/ночи -->
+    <div id="day-night-timer">Ночь: --с | Туман: 100%</div>
+
+    <!-- Кнопка Fullscreen -->
+    <button id="fullscreen-btn" title="Полноэкранный режим"></button>
+
     <!-- Игровой холст -->
-    <canvas id="gameCanvas"></canvas>
+    <canvas id="gameCanvas" style="display: none;"></canvas>
     <div id="rules-ingame-overlay" class="rules-display rules-overlay" style="display: none;">
         Загрузка правил...
    </div>

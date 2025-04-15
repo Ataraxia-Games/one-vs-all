@@ -230,6 +230,8 @@ const shotgunSpread = Math.PI / 12; // Разброс дроби
 const bulletRadius = 2; // Добавим радиус пули для столкновений
 const bulletDamage = 10; // Урон от пули
 let predatorAssigned = false; // Флаг, что Хищник уже назначен
+const DAY_NIGHT_CYCLE_DURATION = 120 * 1000; // 2 минуты в мс
+let currentCycleTime = 0;
 
 // --- Хелпер-функция для расчета здоровья Хищника ---
 function calculatePredatorMaxHealth(numPlayers) {
@@ -311,7 +313,9 @@ io.on('connection', (socket) => {
             input: { keys: {}, angle: 0, isShiftDown: false, isAiming: false }, 
             lastShotTime: 0, 
             lastAttackTime: 0, // Для кулдауна атаки Хищника
-            lastFakeTrailTime: 0 // Для кулдауна ложного следа Хищника
+            lastFakeTrailTime: 0, // Для кулдауна ложного следа Хищника
+            isSprinting: false,
+            isAiming: false
         };
 
         // Если присоединился ОХОТНИК, обновляем здоровье Хищника
@@ -345,8 +349,11 @@ io.on('connection', (socket) => {
         const player = players[socket.id];
         if (!player) return; 
 
-        player.input = inputData;
-        player.angle = inputData.angle; 
+        // Сохраняем весь объект input, включая isShiftDown и isAiming
+        player.input = inputData; 
+        player.angle = inputData.angle; // Обновляем угол напрямую
+        // player.isSprinting = !!(inputData.keys.w || inputData.keys.s); // Старая логика - УДАЛИТЬ ИЛИ ЗАКОММЕНТИТЬ?
+        // player.isAiming = !!inputData.isAiming; // Старая логика
     });
 
     // Обработка запроса на выстрел
@@ -644,37 +651,36 @@ setInterval(() => {
         bullets.push(...activeBullets); 
     }
 
-    // Собираем состояние для отправки
+    // Обновляем время цикла дня/ночи
+    currentCycleTime = (currentCycleTime + TICK_RATE) % DAY_NIGHT_CYCLE_DURATION;
+
     const gameState = {
         players: Object.values(players).map(p => {
-            const inputKeys = p.input.keys || {};
-            const isMoving = inputKeys.w || inputKeys.a || inputKeys.s || inputKeys.d;
-            const isSprinting = !!(isMoving && p.input.isShiftDown); 
-            const isAiming = p.input.isAiming || false; // Получаем isAiming из player.input
-            
+            const input = p.input || {}; // Защита от undefined input
+            const isSprinting = !!input.isShiftDown; // Теперь зависит только от Shift
+            const isAiming = !!input.isAiming;
+
             return {
                 id: p.id,
-                name: p.name,
-                isPredator: p.isPredator,
                 x: p.x,
                 y: p.y,
                 angle: p.angle,
                 color: p.color,
-                maxHealth: p.maxHealth, // <-- Отправляем maxHealth
-                health: p.health, 
-                ammo: p.ammo,     
-                maxAmmo: p.maxAmmo, // <-- Отправляем maxAmmo
-                isSprinting: isSprinting, 
-                isAiming: isAiming // <-- Отправляем isAiming
+                health: p.health,
+                maxHealth: p.maxHealth,
+                ammo: p.ammo,
+                maxAmmo: p.maxAmmo,
+                isSprinting: isSprinting, // Отправляем актуальный статус спринта
+                isPredator: p.isPredator, 
+                isAiming: isAiming, // Отправляем статус прицеливания
+                name: p.name // Добавляем имя
             };
         }),
-        bullets: bullets.map(bullet => ({ 
-            id: bullet.id,
-            x: bullet.x,
-            y: bullet.y
-        })) 
+        bullets: Object.values(bullets).map(b => ({ id: b.id, x: b.x, y: b.y })),
+        // --- Добавляем время цикла --- 
+        cycleTime: currentCycleTime,
+        cycleDuration: DAY_NIGHT_CYCLE_DURATION
     };
-
     io.emit('gameStateUpdate', gameState);
 }, 1000 / TICK_RATE);
 

@@ -117,13 +117,20 @@ class Game {
         this.predatorFakeTrailCooldown = 100; // ms cooldown
         this.lastPredatorFakeTrailTime = 0; // Timestamp of last trail effect
 
+        // --- Day/Night Cycle (controlled by server) --- 
+        this.dayNightCycleDuration = 120 * 1000; // Default, will be updated by server
+        this.currentCycleTime = 0; // Will be updated by server
+        this.currentFogAlpha = 1.0; // Initial state
+        // this.isNight = true; // Не нужна, будет определяться по времени
+        this.dayNightTimerElement = document.getElementById('day-night-timer'); // Кэшируем элемент
+        this.fullscreenButton = document.getElementById('fullscreen-btn'); // Кэшируем кнопку
+
         // НЕ подключаемся и не запускаем цикл здесь
         // this.setupSocketListeners();
         // this.initGame(); 
         // this.resizeCanvas(); 
         // window.addEventListener('resize', () => this.resizeCanvas());
         // this.lastTime = 0;
-        // requestAnimationFrame((time) => this.gameLoop(time));
     }
 
     // Вызывается после ввода имени
@@ -212,6 +219,14 @@ class Game {
                 this.syncBulletEntities(gameState.bullets);
             }
              this.syncPlayerEntities(); // Обновит isPredator в сущностях
+
+            // --- Обновляем время цикла с сервера --- 
+            if (gameState.cycleDuration !== undefined) {
+                this.dayNightCycleDuration = gameState.cycleDuration;
+            }
+            if (gameState.cycleTime !== undefined) {
+                this.currentCycleTime = gameState.cycleTime;
+            }
         });
         
         this.socket.on('playerConnected', (playerData) => {
@@ -311,10 +326,14 @@ class Game {
                  playerEntity.name = serverData.name || ""; // Сохраняем имя
 
                  // Привязываем обработчик кругов ВСЕМ игрокам
-                 playerEntity.onSpeedCircle = (x, y) => {
-                     this.gameEngine.addEffect(new SpeedCircle(x, y));
-                 };
-                 
+                 // playerEntity.onSpeedCircle = (x, y) => {
+                 //     this.gameEngine.addEffect(new SpeedCircle(x, y));
+                 // };
+
+                 // --- Инициализация кулдауна эффекта скорости для ВСЕХ --- 
+                 playerEntity.lastSpeedCircleTime = 0;
+                 playerEntity.speedCircleCooldown = 200; // Можно настроить (ms)
+
                  if (serverId === this.myPlayerId) {
                      playerEntity.isSelf = true; 
                      // Локальный игрок использует свою логику tryGenerateSpeedCircle из Player.js
@@ -325,9 +344,6 @@ class Game {
                      playerEntity.targetY = serverData.y;
                      playerEntity.targetAngle = serverData.angle;
                      playerEntity.angle = serverData.angle; 
-                     // Добавляем свойства для кулдауна эффектов скорости удаленного игрока
-                     playerEntity.lastSpeedCircleTime = 0; 
-                     playerEntity.speedCircleCooldown = 200; // Можно настроить (ms)
                  }
                  this.playerEntities[serverId] = playerEntity;
                  this.gameEngine.addEntity(playerEntity);
@@ -437,12 +453,12 @@ class Game {
 
     // Новый метод для интерполяции сущностей (вызывается в gameLoop)
     interpolateEntities(interpolationFactor = 0.15) {
-        const now = performance.now(); // Получаем текущее время один раз
+        // const now = performance.now(); // Больше не нужно здесь
         for (const id in this.playerEntities) {
             const entity = this.playerEntities[id];
-            if (!entity.isSelf) { // Интерполируем и генерируем эффекты только для других игроков
+            if (!entity.isSelf) { // Интерполируем только других игроков
                 if (entity.targetX !== undefined) {
-                    // Интерполяция X, Y, Angle (как и раньше)
+                    // Интерполяция X, Y, Angle
                     entity.x += (entity.targetX - entity.x) * interpolationFactor;
                     entity.y += (entity.targetY - entity.y) * interpolationFactor;
                     let angleDiff = entity.targetAngle - entity.angle;
@@ -452,15 +468,8 @@ class Game {
                     while (entity.angle > Math.PI) entity.angle -= Math.PI * 2;
                     while (entity.angle < -Math.PI) entity.angle += Math.PI * 2;
                 }
-
-                // --- Генерация кругов скорости для удаленных игроков --- 
-                if (entity.isSprinting && entity.onSpeedCircle) { // Если игрок спринтует и есть обработчик
-                    // Логика tryGenerateSpeedCircle прямо здесь
-                    if (now - entity.lastSpeedCircleTime > entity.speedCircleCooldown) {
-                        entity.lastSpeedCircleTime = now;
-                        entity.onSpeedCircle(entity.x, entity.y); // Вызываем обработчик
-                    }
-                }
+                // --- Генерация кругов скорости УБРАНА ОТСЮДА ---
+                // if (entity.isSprinting && entity.onSpeedCircle) { ... }
             }
         }
     }
@@ -489,9 +498,32 @@ class Game {
     update(deltaTime) {
         if (!this.myPlayerId || !this.player) return {}; // Возвращаем пустой объект, если не готовы
 
+        // --- Обновление цикла дня/ночи (по серверным данным) --- 
+        const cycleDuration = this.dayNightCycleDuration;
+        const cycleTime = this.currentCycleTime;
+        const halfCycle = cycleDuration / 2;
+        const quarterCycle = cycleDuration / 4;
+
+        if (cycleTime < halfCycle) {
+            // Ночь (0 до 1/2)
+            this.currentFogAlpha = 1.0;
+        } else if (cycleTime < halfCycle + quarterCycle) {
+            // Утро/Рассвет (1/2 до 3/4)
+            const timeIntoMorning = cycleTime - halfCycle;
+            const morningProgressRatio = timeIntoMorning / quarterCycle;
+            // Альфа идет от 1.0 (начало утра) до 0.5 (конец утра)
+            this.currentFogAlpha = 1.0 - morningProgressRatio * 0.5;
+        } else {
+            // День/Вечер (3/4 до 1)
+            const timeIntoEvening = cycleTime - (halfCycle + quarterCycle);
+            const eveningProgressRatio = timeIntoEvening / quarterCycle;
+            // Альфа идет от 0.5 (начало вечера) до 1.0 (конец вечера)
+            this.currentFogAlpha = 0.5 + eveningProgressRatio * 0.5;
+        }
+
         const input = this.inputHandler.getInput(); 
 
-        // --- Обновляем Zoom, FOV, Crosshair (локально) ---
+        // --- Обновление Zoom, FOV, Crosshair (локально) ---
         /* // --- Зум колесом отключен ---
         if (input.wheelDelta !== 0) {
             this.zoom -= input.wheelDelta * this.zoomSpeed;
@@ -537,9 +569,21 @@ class Game {
         };
         this.socket.emit('playerInput', inputToSend);
 
-        // --- Обновляем только локальные эффекты --- 
+        // --- Обновление только локальных эффектов --- 
         this.gameEngine.effects.forEach(effect => effect.update(deltaTime));
         this.gameEngine.cleanupEffects();
+
+        // --- НОВАЯ ЛОГИКА: Генерация эффектов спринта для ВСЕХ игроков --- 
+        const now = performance.now();
+        for (const id in this.playerEntities) {
+            const entity = this.playerEntities[id];
+            if (entity.isSprinting) { // Если сервер сказал, что игрок спринтует
+                if (now - entity.lastSpeedCircleTime > entity.speedCircleCooldown) {
+                    entity.lastSpeedCircleTime = now;
+                    this.gameEngine.addEffect(new SpeedCircle(entity.x, entity.y)); // Создаем эффект
+                }
+            }
+        }
         
         // --- Обработка кликов мыши (отправка событий на сервер) ---
         if (input.isLeftMouseClick) {
@@ -793,7 +837,11 @@ class Game {
                 this.fogCtx.globalCompositeOperation = 'source-over'; 
             }
             // Накладываем получившийся туман на основной холст
+            // --- Применяем альфу тумана ТОЛЬКО для Охотника --- 
+            const originalAlpha = this.ctx.globalAlpha;
+            this.ctx.globalAlpha = this.currentFogAlpha; 
             this.ctx.drawImage(this.fogCanvas, 0, 0);
+            this.ctx.globalAlpha = originalAlpha; // Восстанавливаем альфу
         }
         // --- End Fog of War ---
 
@@ -906,6 +954,34 @@ class Game {
             this.ctx.stroke();
         }
         // --- КОНЕЦ ВТОРОГО КУРСОРА --- 
+
+        // --- Обновление таймера дня/ночи --- 
+        if (this.dayNightTimerElement) {
+            const cycleDuration = this.dayNightCycleDuration;
+            const cycleTime = this.currentCycleTime;
+            const halfCycle = cycleDuration / 2;
+            const quarterCycle = cycleDuration / 4;
+            let timeRemainingInPhase;
+            let phaseName;
+
+            if (cycleTime < halfCycle) {
+                // Ночь (0 до 1/2)
+                timeRemainingInPhase = halfCycle - cycleTime;
+                phaseName = "Ночь";
+            } else if (cycleTime < halfCycle + quarterCycle) {
+                // Утро/Рассвет (1/2 до 3/4)
+                timeRemainingInPhase = (halfCycle + quarterCycle) - cycleTime;
+                phaseName = "Рассвет";
+            } else {
+                 // День/Вечер (3/4 до 1)
+                timeRemainingInPhase = cycleDuration - cycleTime;
+                phaseName = "Вечер"; // Можно назвать "День", если хотите
+            }
+            const remainingSeconds = Math.max(0, Math.ceil(timeRemainingInPhase / 1000));
+            const fogOpacityPercent = Math.round(this.currentFogAlpha * 100);
+
+            this.dayNightTimerElement.textContent = `${phaseName}: ${remainingSeconds}с | Туман: ${fogOpacityPercent}%`;
+        }
     }
 
     // Метод для отрисовки списка игроков (снова используется)
@@ -931,7 +1007,7 @@ class Game {
             
             this.ctx.fillStyle = isDead ? 'red' : 'white';
             this.ctx.shadowColor = 'black';
-            this.ctx.shadowBlur = 1; // Исправлено с this.shadowBlur
+            this.shadowBlur = 1; // Исправлено с this.shadowBlur
 
             let displayName = name;
             if (player.id === this.myPlayerId) {
@@ -1049,7 +1125,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const game = new Game();
         game.connectAndJoin(playerName);
         
-        // Обработка неудачного подключения (если сокет не инициализировался или была ошибка в init)
         // Можно добавить таймер или проверку в слушателе 'disconnect' в Game
         // пока просто разблокируем, если что-то пошло не так через 5 секунд
         setTimeout(() => {
@@ -1057,10 +1132,30 @@ document.addEventListener('DOMContentLoaded', () => {
                  nameInput.disabled = false;
                  joinButton.disabled = false;
                  joinButton.textContent = 'Присоединиться';
-                 // Ошибку покажет обработчик 'init'
+                 // Ошибку покажет обработчик 'init' или 'joinError'
+                 // if (!joinError.textContent) { // Только если нет другой ошибки
+                 //     joinError.textContent = 'Не удалось подключиться к серверу.';
+                 //     joinError.style.display = 'block';
+                 // }
             }
         }, 5000); 
     });
+
+    // --- Обработчик кнопки Fullscreen --- 
+    const fullscreenBtn = document.getElementById('fullscreen-btn');
+    if (fullscreenBtn) {
+        fullscreenBtn.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+                });
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            }
+        });
+    }
 }); 
 
 // Вызываем инициализацию правил при загрузке скрипта

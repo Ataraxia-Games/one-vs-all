@@ -31,8 +31,9 @@ export class Player {
         this.bulletLifetime = 500; // ms
 
         // Speed circle properties
-        this.speedCircleCooldown = 200; // ms между кругами
-        this.lastSpeedCircleTime = -Infinity;
+        // this.speedCircleCooldown = 200; // ms between circles
+        // this.lastSpeedCircleTime = 0;
+        // this.onSpeedCircle = null; // Callback for creating effect in Game
 
         // Health properties
         this.maxHealth = 100;
@@ -41,46 +42,39 @@ export class Player {
         this.color = '#000'; // Черный цвет по умолчанию (сервер может прислать другой)
         this.isPredator = false; // Добавляем флаг по умолчанию
         this.name = ""; // Добавляем имя по умолчанию
+        this.isSprinting = false; // Статус спринта (теперь управляется сервером)
     }
 
     update(deltaTime, input, walls) {
-        // Обновляем только угол для отзывчивости прицеливания
-        if (input.mouse && input.mouse.x !== undefined && input.mouse.y !== undefined) {
-            const aimDx = input.mouse.x - this.x;
-            const aimDy = input.mouse.y - this.y;
-            // Угол обновляется локально и отправляется на сервер
-            this.angle = Math.atan2(aimDy, aimDx);
-        }
+        // --- Обновляем только своего игрока --- 
+        if (!this.isSelf) return; // Не обновляем других игроков локально
 
-        // Генерируем круги локально при нажатии Shift - ВОЗВРАЩАЕМ ЛОКАЛЬНУЮ ЛОГИКУ
-        if (input.isShiftDown) { 
-            /* // Старый сетевой код
+        // --- Обновляем угол поворота --- 
+        const dx = input.mouse.x - this.x;
+        const dy = input.mouse.y - this.y;
+        this.angle = Math.atan2(dy, dx);
+
+        // --- Удаляем локальную логику tryGenerateSpeedCircle --- 
+        // if (input.isShiftDown) {
+        //     this.tryGenerateSpeedCircle(input);
+        // }
+    }
+
+    // --- Удаляем метод tryGenerateSpeedCircle --- 
+    /*
+    tryGenerateSpeedCircle(input) {
+        // Only generate if moving and shift is down
+        if (input.keys.w || input.keys.a || input.keys.s || input.keys.d) {
             const now = performance.now();
             if (now - this.lastSpeedCircleTime > this.speedCircleCooldown) {
                 this.lastSpeedCircleTime = now;
-                if (window.game && window.game.socket) {
-                    window.game.socket.emit('playerUsedSprintEffect');
+                if (this.onSpeedCircle) {
+                    this.onSpeedCircle(this.x, this.y);
                 }
-            }
-            */
-             this.tryGenerateSpeedCircle(); // Возвращаем вызов локального метода
-         }
-        
-        // Движение и столкновения теперь обрабатываются сервером
-    }
-
-    // Метод tryGenerateSpeedCircle СНОВА НУЖЕН
-    tryGenerateSpeedCircle() {
-        const now = performance.now();
-        if (now - this.lastSpeedCircleTime > this.speedCircleCooldown) {
-            this.lastSpeedCircleTime = now;
-            // Сигнализируем игре о необходимости создать круг
-            // Game class будет отвечать за создание и добавление эффекта
-            if (this.onSpeedCircle) { // Проверяем, есть ли обработчик
-                 this.onSpeedCircle(this.x, this.y);
             }
         }
     }
+    */
 
     // Метод для создания пуль - БОЛЬШЕ НЕ НУЖЕН НА КЛИЕНТЕ
     /* 
