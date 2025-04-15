@@ -1,5 +1,6 @@
 import { Player } from '../entities/Player.js'; // Убедимся, что Player импортирован
 import { Wall } from '../entities/Wall.js'; // Убедимся, что Wall импортирован
+import { Bonus } from '../entities/Bonus.js'; // <-- Импортируем Bonus
 
 export class GameEngine {
     constructor(ctx) {
@@ -145,8 +146,10 @@ export class GameEngine {
                     entity.render(this.ctx, entity.id === myPlayerId, isPlayerPredator);
                 } else if (entity instanceof Wall) { // Проверяем, стена ли это
                     entity.render(this.ctx, isPlayerPredator); // Передаем флаг хищника стене
-                } else {
-                    entity.render(this.ctx); // Обычный рендер для других сущностей
+                } else if (entity instanceof Bonus) { // <-- Явно проверяем на Bonus
+                    entity.render(this.ctx, isPlayerPredator); // Передаем флаг хищника бонусу
+                } else { // Для всех остальных сущностей
+                    entity.render(this.ctx); // Стандартный вызов
                 }
             }
         });
