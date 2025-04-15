@@ -126,6 +126,7 @@ class Game {
         // this.isNight = true; // Не нужна, будет определяться по времени
         this.dayNightTimerElement = document.getElementById('day-night-timer'); // Кэшируем элемент
         this.fullscreenButton = document.getElementById('fullscreen-btn'); // Кэшируем кнопку
+        this.staticFogViewRadiusPx = 300; // Начальное значение, обновится при ресайзе
 
         // НЕ подключаемся и не запускаем цикл здесь
         // this.setupSocketListeners();
@@ -495,6 +496,10 @@ class Game {
         this.fogCanvas.width = this.canvas.width;
         this.fogCanvas.height = this.canvas.height;
         console.log(`Canvas resized to square: ${this.canvas.width}x${this.canvas.height}`); 
+
+        // Обновляем радиус статического тумана (например, 90% от половины высоты)
+        this.staticFogViewRadiusPx = Math.floor(this.canvas.height * 0.45);
+        console.log(`Static Fog View Radius updated to: ${this.staticFogViewRadiusPx}px`);
     }
 
     // Новый метод для интерполяции сущностей (вызывается в gameLoop)
@@ -947,50 +952,13 @@ class Game {
             if (effect.render) { effect.render(this.ctx); }
         });
         this.ctx.restore(); 
-        
-        // --- Render Player Names (только для Охотников) --- 
-        if (this.player && !this.player.isPredator) { // Рисуем имена, только если мы Охотник
-            this.ctx.save();
-            this.ctx.translate(cameraX, cameraY); // Используем те же смещения камеры
-            this.ctx.scale(this.zoom, this.zoom);  // и масштаб
 
-            this.ctx.font = '12px Arial';
-            this.ctx.textAlign = 'center';
-            this.ctx.textBaseline = 'bottom';
-            this.ctx.shadowColor = 'black';
-            this.ctx.shadowBlur = 2;
+        // --- Render Radial Static Fog --- 
+        this.ctx.restore(); 
+        // --- End Radial Static Fog (Canvas Version) ---
 
-            for (const id in this.playerEntities) {
-                const entity = this.playerEntities[id];
-                // Рисуем имя для других игроков, если они не Хищники
-                if (id !== this.myPlayerId && entity.name && !entity.isPredator) {
-                    this.ctx.fillStyle = 'white'; // Белый цвет имени
-                    // Используем entity.radius (должен быть у Player) для расчета Y
-                    const nameY = entity.y - (entity.radius || entity.size / 2) - 5; 
-                    this.ctx.fillText(entity.name, entity.x, nameY); // Над спрайтом
-                }
-            }
-            this.ctx.restore();
-        }
-        // --- End Render Player Names --- 
-
-        // --- Render Crosshair (ЗАМЕНЕНО НИЖЕ) ---
-        /*
-        if (input && input.rawMouseX !== undefined) {
-            const crosshairRadius = this.currentCrosshairRadius; 
-            const scaledRadius = crosshairRadius * this.zoom; 
-            this.ctx.strokeStyle = '#ffffff'; 
-            this.ctx.lineWidth = 1; 
-            this.ctx.beginPath();
-            this.ctx.arc(input.rawMouseX, input.rawMouseY, scaledRadius, 0, Math.PI * 2);
-            this.ctx.stroke();
-        }
-        */
-        // --- End Custom Crosshair ---
-
-        // --- Render UI --- 
-        this.renderPlayerList(); // ВОЗВРАЩАЕМ список игроков справа
-        // this.renderCrosshair(input); // Оставили только прицел - ЗАМЕНЕНО
+        // --- Render UI (Player List, Timer, Crosshair, Fullscreen Button) --- 
+        this.renderPlayerList(); // Список игроков справа
 
         // --- РИСУЕМ КУРСОР (замена renderCrosshair) ---
         if (this.player && input && input.rawMouseX !== undefined) {

@@ -168,6 +168,30 @@
         #fullscreen-btn:hover {
             opacity: 1.0; /* Полная непрозрачность при наведении */
         }
+
+        /* Контейнер для игры */
+        #game-container {
+            position: relative; /* Для позиционирования оверлея */
+            display: inline-block; /* Чтобы облегал канвас */
+            /* Убедимся, что Flexbox на body центрирует этот блок */
+            margin: auto; /* Дополнительно для центрирования */
+        }
+
+        /* Оверлей виньетки */
+        #vignette-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            /* Градиент: прозрачный центр ~350px, плавный переход к черному к ~600px */
+            background: radial-gradient(circle at center, 
+                            rgba(0,0,0,0) 350px, /* Прозрачно до 350px */ 
+                            rgba(0,0,0,1) 600px  /* Непрозрачно после 600px */
+                            );
+            pointer-events: none; /* Пропускает клики */
+            z-index: 50; /* Над канвасом, под UI */
+        }
     </style>
 </head>
 <body>
@@ -195,11 +219,17 @@
     <!-- Кнопка Fullscreen -->
     <button id="fullscreen-btn" title="Полноэкранный режим"></button>
 
-    <!-- Игровой холст -->
-    <canvas id="gameCanvas" style="display: none;"></canvas>
+    <!-- Контейнер для игры и оверлея -->
+    <div id="game-container">
+        <!-- Игровой холст -->
+        <canvas id="gameCanvas" style="display: none;"></canvas>
+        <!-- Оверлей для виньетки -->
+        <div id="vignette-overlay"></div>
+    </div>
+
     <div id="rules-ingame-overlay" class="rules-display rules-overlay" style="display: none;">
         Загрузка правил...
-   </div>
+    </div>
     
     <!-- Контейнер для правого баннера - УДАЛЯЕМ -->
     <!--
