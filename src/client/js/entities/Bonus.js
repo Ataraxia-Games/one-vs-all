@@ -28,18 +28,10 @@ export class Bonus {
         // Determine color based on viewer
         const renderColor = isViewerPredator ? 'rgb(128, 128, 128)' : '#000000'; // Grey for Predator, Black for Hunter
 
-        if (this.type === 'ammo') {
-            // Ammo bonus: Square with amount text (only for Hunter)
-            const size = this.radius * 1.8; // Make square slightly larger
-            ctx.fillStyle = renderColor; // Use determined color
-            ctx.fillRect(this.x - size / 2, this.y - size / 2, size, size);
-        } else {
-            // Default/Night bonus: Circle
-            ctx.fillStyle = renderColor; // Use determined color
-            ctx.beginPath();
-            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-            ctx.fill();
-        }
+        // --- Always draw a square --- 
+        const size = this.radius * 1.8; // Make square slightly larger
+        ctx.fillStyle = renderColor; // Use determined color
+        ctx.fillRect(this.x - size / 2, this.y - size / 2, size, size);
 
         // Draw collection progress bar (common logic)
         if (this.isCollecting) {
