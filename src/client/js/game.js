@@ -123,7 +123,7 @@ class Game {
         this.dayNightCycleDuration = 120 * 1000; // Default, will be updated by server
         this.currentCycleTime = 0; // Will be updated by server
         this.currentFogAlpha = 1.0; // Initial state
-        // this.isNight = true; // Не нужна, будет определяться по времени
+        this.cycleCount = 1; // <-- Счетчик циклов
         this.dayNightTimerElement = document.getElementById('day-night-timer'); // Кэшируем элемент
         this.fullscreenButton = document.getElementById('fullscreen-btn'); // Кэшируем кнопку
         this.staticFogViewRadiusPx = 300; // Начальное значение, обновится при ресайзе
@@ -229,6 +229,9 @@ class Game {
             }
             if (gameState.cycleTime !== undefined) {
                 this.currentCycleTime = gameState.cycleTime;
+            }
+            if (gameState.cycleCount !== undefined) { // <-- Обновляем счетчик цикла
+                this.cycleCount = gameState.cycleCount;
             }
 
             // --- Синхронизация бонусов ---
@@ -1059,10 +1062,11 @@ class Game {
                 timeRemainingInPhase = cycleDuration - cycleTime;
                 phaseName = "Вечер"; // Можно назвать "День", если хотите
             }
-            const remainingSeconds = Math.max(0, Math.ceil(timeRemainingInPhase / 1000));
-            const fogOpacityPercent = Math.round(this.currentFogAlpha * 100);
+            // const remainingSeconds = Math.max(0, Math.ceil(timeRemainingInPhase / 1000)); // Больше не нужно
+            // const fogOpacityPercent = Math.round(this.currentFogAlpha * 100); // Больше не нужно
 
-            this.dayNightTimerElement.textContent = `${phaseName}: ${remainingSeconds}с | Туман: ${fogOpacityPercent}%`;
+            // this.dayNightTimerElement.textContent = `${phaseName}: ${remainingSeconds}с | Туман: ${fogOpacityPercent}%`;
+            this.dayNightTimerElement.textContent = `${phaseName} ${this.cycleCount}`;
         }
     }
 
@@ -1088,7 +1092,6 @@ class Game {
             const isDead = player.health <= 0;
             
             this.ctx.fillStyle = isDead ? 'red' : 'white';
-            this.ctx.shadowColor = 'black';
             this.shadowBlur = 1; // Исправлено с this.shadowBlur
 
             let displayName = name;

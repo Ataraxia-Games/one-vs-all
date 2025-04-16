@@ -235,6 +235,7 @@ let predatorAssigned = false; // Флаг, что Хищник уже назна
 const DAY_NIGHT_CYCLE_DURATION = 120 * 1000; // 2 минуты в мс
 let currentCycleTime = 0;
 let wasNight = true; // Флаг для отслеживания смены фазы
+let cycleCounter = 1; // <-- Счетчик циклов дня/ночи
 
 // --- Константы для бонусов ---
 const BONUS_RADIUS = 15; // Такой же как у игрока?
@@ -700,7 +701,13 @@ setInterval(() => {
     }
 
     // Обновляем время цикла дня/ночи
-    currentCycleTime = (currentCycleTime + TICK_RATE) % DAY_NIGHT_CYCLE_DURATION;
+    const previousCycleTime = currentCycleTime;
+    currentCycleTime = (currentCycleTime + (1000 / TICK_RATE)) % DAY_NIGHT_CYCLE_DURATION;
+    // Если время стало меньше, значит цикл завершился
+    if (currentCycleTime < previousCycleTime) {
+        cycleCounter++;
+        console.log(`[Cycle] New cycle started: ${cycleCounter}`);
+    }
 
     // --- Логика спавна бонусов при наступлении ночи --- 
     const isNightNow = currentCycleTime < DAY_NIGHT_CYCLE_DURATION / 2;
@@ -800,7 +807,8 @@ setInterval(() => {
         bonuses: bonuses.map(b => ({ id: b.id, x: b.x, y: b.y })), // <-- Отправляем бонусы
         // --- Добавляем время цикла --- 
         cycleTime: currentCycleTime,
-        cycleDuration: DAY_NIGHT_CYCLE_DURATION
+        cycleDuration: DAY_NIGHT_CYCLE_DURATION,
+        cycleCount: cycleCounter // <-- Отправляем номер цикла
     };
     io.emit('gameStateUpdate', gameState);
 }, 1000 / TICK_RATE);
