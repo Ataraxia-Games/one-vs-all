@@ -1115,7 +1115,7 @@ class Game {
             const r = Math.round(fullHealthColor.r + (zeroHealthColor.r - fullHealthColor.r) * (1 - healthPercent));
             const g = Math.round(fullHealthColor.g + (zeroHealthColor.g - fullHealthColor.g) * (1 - healthPercent));
             const b = Math.round(fullHealthColor.b + (zeroHealthColor.b - fullHealthColor.b) * (1 - healthPercent));
-            const borderColor = `rgb(${r}, ${g}, ${b})`; // <-- Reverted to rgb (100% opaque)
+            const borderColor = `rgba(${r}, ${g}, ${b}, 0.7)`; // <-- Use rgba for 70% transparency
             this.predatorHighlightColor = borderColor; // <-- Store the calculated color
 
             // Рисуем рамку вокруг мировых координат Хищника
@@ -1123,7 +1123,7 @@ class Game {
             if (corners && corners.length > 0) {
                 this.ctx.strokeStyle = borderColor;
                 // this.ctx.lineWidth = 3; // Толщина рамки
-                this.ctx.lineWidth = 1; // <-- Set line width to 1px
+                this.ctx.lineWidth = 3; // <-- Set line width back to 3px
                 this.ctx.beginPath();
                 this.ctx.moveTo(corners[0].x, corners[0].y);
                 for (let i = 1; i < corners.length; i++) {
