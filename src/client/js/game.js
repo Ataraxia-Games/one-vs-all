@@ -552,13 +552,13 @@ class Game {
             // Ночь (0 до 1/2)
             this.currentFogAlpha = 1.0;
         } else if (cycleTime < halfCycle + quarterCycle) {
-            // Утро/Рассвет (1/2 до 3/4)
+            // Утро/Рассвет (1/2 до 3/4) - Возвращаем плавное изменение
             const timeIntoMorning = cycleTime - halfCycle;
             const morningProgressRatio = timeIntoMorning / quarterCycle;
             // Альфа идет от 1.0 (начало утра) до 0.5 (конец утра)
             this.currentFogAlpha = 1.0 - morningProgressRatio * 0.5;
         } else {
-            // День/Вечер (3/4 до 1)
+            // День/Вечер (3/4 до 1) - Возвращаем плавное изменение
             const timeIntoEvening = cycleTime - (halfCycle + quarterCycle);
             const eveningProgressRatio = timeIntoEvening / quarterCycle;
             // Альфа идет от 0.5 (начало вечера) до 1.0 (конец вечера)
@@ -1051,20 +1051,14 @@ class Game {
 
             if (cycleTime < halfCycle) {
                 // Ночь (0 до 1/2)
-                timeRemainingInPhase = halfCycle - cycleTime;
+                timeRemainingInPhase = halfCycle - cycleTime; // Время до конца ночи
                 phaseName = "Ночь";
-            } else if (cycleTime < halfCycle + quarterCycle) {
-                // Утро/Рассвет (1/2 до 3/4)
-                timeRemainingInPhase = (halfCycle + quarterCycle) - cycleTime;
-                phaseName = "Рассвет";
             } else {
-                 // День/Вечер (3/4 до 1)
-                timeRemainingInPhase = cycleDuration - cycleTime;
-                phaseName = "Вечер"; // Можно назвать "День", если хотите
+                // День (1/2 до 1)
+                timeRemainingInPhase = cycleDuration - cycleTime; // Время до конца дня (и всего цикла)
+                phaseName = "День";
             }
-            // const remainingSeconds = Math.max(0, Math.ceil(timeRemainingInPhase / 1000)); // Больше не нужно
-            // const fogOpacityPercent = Math.round(this.currentFogAlpha * 100); // Больше не нужно
-
+            
             // this.dayNightTimerElement.textContent = `${phaseName}: ${remainingSeconds}с | Туман: ${fogOpacityPercent}%`;
             this.dayNightTimerElement.textContent = `${phaseName} ${this.cycleCount}`;
         }
