@@ -864,6 +864,13 @@ setInterval(() => {
 
         if (bonusesToSpawn > 0) {
             const boundaryVertices = mapGenerator.getBoundaryVertices();
+            // --- Находим Хищника ЗДЕСЬ, перед циклом спавна ---
+            let predator = null;
+            const predatorId = Object.keys(players).find(id => players[id] && players[id].isPredator);
+            if (predatorId) {
+                predator = players[predatorId];
+            }
+            // --- Конец поиска Хищника ---
             let spawnedCount = 0;
             let attemptsTotal = 0; // Защита от бесконечного цикла спавна
             const maxSpawnTotalAttempts = bonusesToSpawn * 100; // Макс попыток на все бонусы
