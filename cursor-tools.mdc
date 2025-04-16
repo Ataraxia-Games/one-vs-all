@@ -1,7 +1,7 @@
 ---
 description: 
 globs: 
-alwaysApply: true
+alwaysApply: false
 ---
 cursor-tools is a CLI tool that allows you to interact with AI models and other tools.
 cursor-tools is installed on this machine and it is available to you to execute. You're encouraged to use it.

@@ -1243,34 +1243,52 @@ class Game {
 
     // Метод для отрисовки списка игроков (снова используется)
     renderPlayerList() {
-        const padding = 10;
-        const startX = this.canvas.width - padding;
-        let startY = padding;
+        const padding = 15; // Increased padding a bit
+        // const startX = this.canvas.width - padding; // Old top-right X
+        // let startY = padding; // Old top-right Y
+        // const startY = 40; // New starting Y below the timer area (Used for columns)
+        let currentY = 40; // Let's use a variable Y that increments
         const fontSize = 14;
         const lineHeight = fontSize * 1.3;
+        // const columnWidth = 150; // Approximate width for each column (Removed)
+        const startX = this.canvas.width / 2; // Center the list horizontally
 
         this.ctx.save();
         this.ctx.font = `${fontSize}px Arial`;
-        this.ctx.textAlign = 'right';
+        // this.ctx.textAlign = 'right'; // Old alignment
+        this.ctx.textAlign = 'center'; // Center the text
         this.ctx.textBaseline = 'top';
 
         // Получаем массив игроков из this.players и сортируем (опционально)
         const playerList = Object.values(this.players);
         // playerList.sort((a, b) => a.name.localeCompare(b.name));
 
-        playerList.forEach(player => {
+        // playerList.forEach((player, index) => { // Loop with index (No longer need index for columns)
+        playerList.forEach(player => { // Simpler loop for single column
             const name = player.name || `Player ${player.id}`; // Запасной вариант имени
             const isDead = player.health <= 0;
             
             this.ctx.fillStyle = isDead ? 'red' : 'white';
-            this.shadowBlur = 1; // Исправлено с this.shadowBlur
+            this.ctx.shadowColor = 'black'; 
+            this.ctx.shadowBlur = 2; 
 
             let displayName = name;
             if (player.id === this.myPlayerId) {
                 displayName = `> ${name} <`; // Выделяем себя
             }
 
-            this.ctx.fillText(displayName, startX, startY);
+            // Calculate column and row (Removed)
+            // const colIndex = index % 3;
+            // const rowIndex = Math.floor(index / 3);
+
+            // Calculate X and Y for the current name (Removed column logic)
+            // const currentX = startX + colIndex * columnWidth;
+            // const currentY = startY + rowIndex * lineHeight;
+            const currentX = startX; // X is fixed for single column
+
+            // this.ctx.fillText(displayName, startX, startY); // Old drawing
+            // this.ctx.fillText(displayName, currentX, currentY); // Draw in columns (Replaced)
+            this.ctx.fillText(displayName, currentX, currentY); // Draw in single column at currentY
 
             // Добавляем зачеркивание для мертвых
             if (isDead) {
@@ -1278,12 +1296,15 @@ class Game {
                 this.ctx.strokeStyle = 'red';
                 this.ctx.lineWidth = 1;
                 this.ctx.beginPath();
-                this.ctx.moveTo(startX - textWidth, startY + fontSize / 2);
-                this.ctx.lineTo(startX, startY + fontSize / 2);
+                // this.ctx.moveTo(startX - textWidth, startY + fontSize / 2); // Old strikethrough (right aligned)
+                // this.ctx.lineTo(startX, startY + fontSize / 2);
+                this.ctx.moveTo(currentX - textWidth / 2, currentY + fontSize / 2); // Centered strikethrough
+                this.ctx.lineTo(currentX + textWidth / 2, currentY + fontSize / 2);
                 this.ctx.stroke();
             }
 
-            startY += lineHeight; // Сдвигаем Y для следующего имени
+            // startY += lineHeight; // No longer needed, Y is calculated by row (Replaced)
+            currentY += lineHeight; // Increment Y for the next name in the column
         });
 
         this.ctx.restore();
