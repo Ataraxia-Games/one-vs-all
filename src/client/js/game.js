@@ -114,6 +114,7 @@ class Game {
         this.predatorAttackCharge = 1.0; // Текущий заряд атаки (0.0 - 1.0)
         this.predatorAttackChargeSpeed = 1.0; // Скорость заряда (% / сек)
         this.predatorBaseAttackRange = 75; // Базовая дальность атаки (было 50)
+        this.predatorHighlightColor = null; // <-- Add property to store highlight color
 
         // Predator fake trail properties
         this.predatorFakeTrailCooldown = 100; // ms cooldown
@@ -124,6 +125,14 @@ class Game {
         this.currentCycleTime = 0; // Will be updated by server
         this.currentFogAlpha = 1.0; // Initial state
         this.cycleCount = 1; // <-- Счетчик циклов
+
+        // --- Hunter Focus Battery ---
+        this.hunterFocusMax = 5000; // 5 секунд в мс
+        this.hunterFocusCurrent = this.hunterFocusMax;
+        this.hunterFocusDrainRate = 1000; // Единиц в секунду (полная разрядка за 5с)
+        this.hunterFocusRechargeRate = 800; // Единиц в секунду (полная зарядка ~6с)
+        this.hunterFocusFovMultiplier = 0.70; // 70% от базового угла
+
         this.dayNightTimerElement = document.getElementById('day-night-timer'); // Кэшируем элемент
         this.fullscreenButton = document.getElementById('fullscreen-btn'); // Кэшируем кнопку
         this.staticFogViewRadiusPx = 300; // Начальное значение, обновится при ресайзе
@@ -567,21 +576,31 @@ class Game {
 
         const input = this.inputHandler.getInput(); 
 
+        // --- Обновление батарейки фокуса Охотника ---
+        if (this.player && !this.player.isPredator) {
+            const dtSeconds = deltaTime / 1000;
+            if (input.isRightMouseDown) {
+                this.hunterFocusCurrent = Math.max(0, this.hunterFocusCurrent - this.hunterFocusDrainRate * dtSeconds);
+            } else {
+                this.hunterFocusCurrent = Math.min(this.hunterFocusMax, this.hunterFocusCurrent + this.hunterFocusRechargeRate * dtSeconds);
+            }
+        }
+
         // --- Обновление Zoom, FOV, Crosshair (локально) ---
 
         // --- Update Target FOV Radius & Angle based on RMB ---
-        if (input.isRightMouseDown) {
-            this.targetWorldViewRadius = this.baseWorldViewRadius * 1.3; // Increase radius
-            this.targetFovAngle = Math.PI / 3; // Narrow angle to 60 degrees
-            this.targetCrosshairRadius = this.baseCrosshairRadius / 2; 
-        } else {
-            this.targetWorldViewRadius = this.baseWorldViewRadius * 0.8; // Decrease radius
+        if (this.player && !this.player.isPredator && input.isRightMouseDown && this.hunterFocusCurrent > 0) { // Только для Охотника с зарядом
+            // this.targetWorldViewRadius = this.baseWorldViewRadius * 1.3; // Increase radius <-- REMOVED
+            this.targetFovAngle = this.baseFovAngle * this.hunterFocusFovMultiplier; // Уменьшенный угол
+            this.targetCrosshairRadius = this.baseCrosshairRadius / 2;
+        } else { // Для Хищника или если Охотник не целится / без заряда
+            // this.targetWorldViewRadius = this.baseWorldViewRadius * 0.8; // Decrease radius <-- REMOVED
             this.targetFovAngle = this.baseFovAngle; // Restore base angle (90 degrees)
-            this.targetCrosshairRadius = this.baseCrosshairRadius; 
+            this.targetCrosshairRadius = this.baseCrosshairRadius;
         }
 
         // --- Smoothly Interpolate Current FOV Radius & Angle ---
-        this.currentWorldViewRadius += (this.targetWorldViewRadius - this.currentWorldViewRadius) * this.fovTransitionSpeed;
+        // this.currentWorldViewRadius += (this.targetWorldViewRadius - this.currentWorldViewRadius) * this.fovTransitionSpeed; // Radius interpolation REMOVED as target no longer changes
         this.currentFovAngle += (this.targetFovAngle - this.currentFovAngle) * this.fovTransitionSpeed;
 
         // --- Update Target & Interpolate Crosshair Radius ---
@@ -703,6 +722,8 @@ class Game {
 
         // --- Добавим лог перед проверкой фона ---
 
+        let shouldHighlightPredator = false; // Локальная переменная для флага подсветки
+
         // --- Расчет цвета фона (используем this.player) ---
         let backgroundColor;
         if (this.player.isPredator) {
@@ -729,7 +750,82 @@ class Game {
         this.ctx.translate(cameraX, cameraY);
         this.ctx.scale(this.zoom, this.zoom);
         // Рендерим все сущности из gameEngine (игроки, стены)
+
+        // --- Определение видимости Хищника для подсветки --- 
+        let predatorEntity = null;
+        for (const id in this.playerEntities) {
+            if (this.playerEntities[id].isPredator) {
+                predatorEntity = this.playerEntities[id];
+                break;
+            }
+        }
+
+        if (predatorEntity) {
+            predatorEntity.forceTrueColor = false; // Сброс флага по умолчанию
+            // Проверяем видимость только если текущий игрок - Охотник и целится
+            if (this.player && !this.player.isPredator && input.isRightMouseDown && this.hunterFocusCurrent > 0) { 
+                const dx = predatorEntity.x - this.player.x;
+                const dy = predatorEntity.y - this.player.y;
+                const distToPredatorSq = dx*dx + dy*dy;
+                const rayEndXWorld = predatorEntity.x; // Луч прямо к Хищнику
+                const rayEndYWorld = predatorEntity.y;
+                let wallHit = false;
+                console.log(`[Highlight Check] Player Angle: ${this.player.angle.toFixed(2)}, FOV: ${(this.currentFovAngle).toFixed(2)}`); // DEBUG
+                
+                for (const wall of this.gameEngine.walls) {
+                     const corners = wall.getCorners ? wall.getCorners() : wall.corners;
+                     if (corners && corners.length > 1) {
+                        for (let j = 0; j < corners.length; j++) {
+                            const corner1 = corners[j];
+                            const corner2 = corners[(j + 1) % corners.length];
+                            const hit = intersectSegments(this.player.x, this.player.y, rayEndXWorld, rayEndYWorld, corner1.x, corner1.y, corner2.x, corner2.y);
+                            if (hit) {
+                                // Проверяем, что стена БЛИЖЕ Хищника
+                                const dxHit = hit.x - this.player.x;
+                                const dyHit = hit.y - this.player.y;
+                                const distToWallSq = dxHit*dxHit + dyHit*dyHit;
+                                if (distToWallSq < distToPredatorSq - 1e-6) { // С небольшой погрешностью
+                                    console.log(`[Highlight Check] Wall Hit Detected!`); // DEBUG
+                                    wallHit = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (wallHit) break;
+                }
+                
+                // Проверяем, что Хищник в угле обзора
+                let isInFov = false;
+                if (!wallHit) {
+                    const angleToPredator = Math.atan2(dy, dx);
+                    const playerAngle = this.player.angle;
+                    const currentFovAngle = this.currentFovAngle; // Используем текущий угол
+                    let angleDiff = angleToPredator - playerAngle;
+                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                    isInFov = Math.abs(angleDiff) <= currentFovAngle / 2;
+                    console.log(`[Highlight Check] Angle to Predator: ${angleToPredator.toFixed(2)}, Diff: ${angleDiff.toFixed(2)}, In FOV: ${isInFov}`); // DEBUG
+                }
+
+                if (!wallHit && isInFov) {
+                     // Прямая видимость И в угле обзора - устанавливаем флаг
+                     console.log(`[Highlight Check] Setting shouldHighlightPredator = true`); // DEBUG
+                     // predatorEntity.forceTrueColor = true; // Устанавливаем локальную переменную
+                     shouldHighlightPredator = true;
+                }
+            }
+        }
+        // --- Конец определения видимости --- 
+
         this.gameEngine.render(this.myPlayerId, this.player.isPredator); // <-- Передаем роль игрока
+
+        // --- Сброс флага подсветки после рендера --- 
+        if (predatorEntity) {
+            predatorEntity.forceTrueColor = false;
+        }
+
+        this.ctx.restore(); // <-- Конец блока мира
         
         // --- Render UI (Ammo Count) - ВНУТРИ МАСШТАБИРУЕМОГО КОНТЕКСТА --- 
         if (this.player && !this.player.isPredator) { 
@@ -737,6 +833,9 @@ class Game {
             const fontSize = 14; // Фиксированный размер шрифта
             
             this.ctx.save(); // Дополнительный save/restore для текста
+             // Рисуем текст относительно игрока, но НЕ масштабируем сам текст
+            this.ctx.translate(cameraX, cameraY);
+            this.ctx.scale(this.zoom, this.zoom);
             this.ctx.font = `bold ${fontSize}px Arial`;
             this.ctx.fillStyle = 'white'; // Белый цвет без тени
             this.ctx.textAlign = 'center';
@@ -746,8 +845,6 @@ class Game {
             this.ctx.restore(); // Восстанавливаем состояние после текста
         }
 
-        this.ctx.restore(); // <-- Конец блока мира
-        
         // --- Render Hunter FOV (для Хищника) --- 
         if (this.player && this.player.isPredator) {
             this.ctx.save();
@@ -856,17 +953,23 @@ class Game {
             const playerScreenY = this.fogCanvas.height / 2;
             const numRays = 120; // <-- ВОССТАНАВЛИВАЕМ numRays для Охотника
             const fovAngle = this.currentFovAngle; 
-            const worldViewRadius = this.currentWorldViewRadius; 
+            // const worldViewRadius = this.currentWorldViewRadius; // Используем эффективный радиус
+            
+            // --- Расчет эффективного радиуса с учетом фокуса --- 
+            const focusFactor = Math.max(0.1, this.hunterFocusCurrent / this.hunterFocusMax); // От 0.1 до 1.0
+            const effectiveWorldViewRadius = this.currentWorldViewRadius * focusFactor;
+            // --- Конец расчета --- 
+            
             const angleStep = fovAngle / numRays;
             const startAngle = this.player.angle - fovAngle / 2;
             const visibilityPoints = []; 
 
             for (let i = 0; i <= numRays; i++) {
                 const currentAngle = startAngle + i * angleStep;
-                const rayEndXWorld = this.player.x + worldViewRadius * Math.cos(currentAngle);
-                const rayEndYWorld = this.player.y + worldViewRadius * Math.sin(currentAngle);
+                const rayEndXWorld = this.player.x + effectiveWorldViewRadius * Math.cos(currentAngle);
+                const rayEndYWorld = this.player.y + effectiveWorldViewRadius * Math.sin(currentAngle);
                 let closestHit = null;
-                let minHitDistSq = worldViewRadius * worldViewRadius;
+                let minHitDistSq = effectiveWorldViewRadius * effectiveWorldViewRadius;
 
                 // 1. Проверка пересечения со стенами (ВОССТАНАВЛИВАЕМ КОД)
                 for (const wall of this.gameEngine.walls) {
@@ -940,7 +1043,8 @@ class Game {
                 this.fogCtx.moveTo(playerScreenX, playerScreenY); 
                 visibilityPoints.forEach(p => this.fogCtx.lineTo(p.x, p.y)); 
                 this.fogCtx.closePath();
-                const screenViewRadius = this.currentWorldViewRadius * this.zoom;
+                // const screenViewRadius = this.currentWorldViewRadius * this.zoom; // Используем эффективный
+                const screenViewRadius = effectiveWorldViewRadius * this.zoom;
                 const fovGradient = this.fogCtx.createRadialGradient( playerScreenX, playerScreenY, screenViewRadius * 0.2, playerScreenX, playerScreenY, screenViewRadius );
                 fovGradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); 
                 fovGradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); 
@@ -950,7 +1054,8 @@ class Game {
                 
                 // --- Ближний круг видимости (инвертированный) ---
                 const closeRadiusWorld = 70; // Используем значение, которое вы установили
-                const closeRadiusScreen = closeRadiusWorld * this.zoom;
+                // const closeRadiusScreen = closeRadiusWorld * this.zoom; // Масштабируем с учетом фокуса?
+                const closeRadiusScreen = closeRadiusWorld * this.zoom * focusFactor; // Да, масштабируем
                 const closeGradient = this.fogCtx.createRadialGradient( playerScreenX, playerScreenY, 0, playerScreenX, playerScreenY, closeRadiusScreen );
                 closeGradient.addColorStop(0, 'rgba(0, 0, 0, 1)'); // Невидимый центр
                 closeGradient.addColorStop(1, 'rgba(0, 0, 0, 0)'); // Видимый край
@@ -980,7 +1085,56 @@ class Game {
             if (effect.render) { effect.render(this.ctx); }
         });
         this.ctx.restore(); 
+
+        // --- Затемнение экрана при разрядке батареи фокуса Охотника ---
+        if (this.player && !this.player.isPredator) {
+             const dimness = 1.0 - (this.hunterFocusCurrent / this.hunterFocusMax);
+             // Применяем затемнение только НОЧЬЮ
+             if (dimness > 0 && this.currentFogAlpha === 1.0) { 
+                this.ctx.save();
+                this.ctx.fillStyle = `rgba(0, 0, 0, ${dimness})`;
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+                this.ctx.restore();
+             }
+        }
+        // --- Конец затемнения ---
+
         // --- End Radial Static Fog (Canvas Version) ---
+
+        // --- Рисуем рамку подсветки Хищника --- 
+        this.predatorHighlightColor = null; // Reset highlight color each frame
+        if (predatorEntity && shouldHighlightPredator) {
+            this.ctx.save();
+            this.ctx.translate(cameraX, cameraY); // Применяем трансформации камеры
+            this.ctx.scale(this.zoom, this.zoom);
+
+            // Получаем цвет по ХП (копипаста из Player.render)
+            const healthPercent = Math.max(0, Math.min(1, predatorEntity.currentHealth / predatorEntity.maxHealth));
+            const fullHealthColor = { r: 78, g: 87, b: 40 };
+            const zeroHealthColor = { r: 120, g: 0, b: 0 };
+            const r = Math.round(fullHealthColor.r + (zeroHealthColor.r - fullHealthColor.r) * (1 - healthPercent));
+            const g = Math.round(fullHealthColor.g + (zeroHealthColor.g - fullHealthColor.g) * (1 - healthPercent));
+            const b = Math.round(fullHealthColor.b + (zeroHealthColor.b - fullHealthColor.b) * (1 - healthPercent));
+            const borderColor = `rgb(${r}, ${g}, ${b})`; // <-- Reverted to rgb (100% opaque)
+            this.predatorHighlightColor = borderColor; // <-- Store the calculated color
+
+            // Рисуем рамку вокруг мировых координат Хищника
+            const corners = predatorEntity.getCorners();
+            if (corners && corners.length > 0) {
+                this.ctx.strokeStyle = borderColor;
+                // this.ctx.lineWidth = 3; // Толщина рамки
+                this.ctx.lineWidth = 1; // <-- Set line width to 1px
+                this.ctx.beginPath();
+                this.ctx.moveTo(corners[0].x, corners[0].y);
+                for (let i = 1; i < corners.length; i++) {
+                    this.ctx.lineTo(corners[i].x, corners[i].y);
+                }
+                this.ctx.closePath();
+                this.ctx.stroke();
+            }
+            this.ctx.restore();
+        }
+        // --- Конец рамки подсветки ---
 
         // --- Render UI (Player List, Timer, Crosshair, Fullscreen Button) --- 
         this.renderPlayerList(); // Список игроков справа
@@ -990,10 +1144,28 @@ class Game {
 
             if (!this.player.isPredator) {
                 // --- Курсор Охотника (круг) ---
-                this.ctx.lineWidth = 1; // Толщина 1
+                let cursorLineWidth = 1;
+                let cursorStrokeStyle = '#ffffff';
                 const crosshairRadius = this.currentCrosshairRadius; 
                 const scaledRadius = crosshairRadius * this.zoom; // Учитываем зум для размера
-                this.ctx.strokeStyle = '#ffffff'; 
+
+                // Проверяем, целимся ли мы в видимого Хищника
+                console.log(`Cursor Check: Aiming=${input.isRightMouseDown}, Predator Found=${!!predatorEntity}, ShouldHighlight=${shouldHighlightPredator}`); // DEBUG
+                if (input.isRightMouseDown && predatorEntity && shouldHighlightPredator) { // Проверяем локальный флаг
+                     cursorLineWidth = 2; // Увеличиваем толщину
+                    // Рассчитываем цвет по ХП Хищника
+                    // const healthPercent = Math.max(0, Math.min(1, predatorEntity.currentHealth / predatorEntity.maxHealth));
+                    // const fullHealthColor = { r: 78, g: 87, b: 40 };
+                    // const zeroHealthColor = { r: 120, g: 0, b: 0 };
+                    // const r = Math.round(fullHealthColor.r + (zeroHealthColor.r - fullHealthColor.r) * (1 - healthPercent));
+                    // const g = Math.round(fullHealthColor.g + (zeroHealthColor.g - fullHealthColor.g) * (1 - healthPercent));
+                    // const b = Math.round(fullHealthColor.b + (zeroHealthColor.b - fullHealthColor.b) * (1 - healthPercent));
+                    // cursorStrokeStyle = `rgb(${r}, ${g}, ${b})`; // Устанавливаем цвет <-- REPLACED
+                    cursorStrokeStyle = this.predatorHighlightColor || '#ffffff'; // <-- Use stored highlight color
+                }
+
+                this.ctx.lineWidth = cursorLineWidth;
+                this.ctx.strokeStyle = cursorStrokeStyle; 
                 this.ctx.beginPath();
                 // Рисуем в экранных координатах мыши
                 this.ctx.arc(input.rawMouseX, input.rawMouseY, scaledRadius, 0, Math.PI * 2);
@@ -1062,6 +1234,11 @@ class Game {
             // this.dayNightTimerElement.textContent = `${phaseName}: ${remainingSeconds}с | Туман: ${fogOpacityPercent}%`;
             this.dayNightTimerElement.textContent = `${phaseName} ${this.cycleCount}`;
         }
+
+        // --- ОКОНЧАТЕЛЬНЫЙ Сброс флага подсветки --- 
+        // if (predatorEntity) { // Больше не нужно, флаг локальный
+        //     predatorEntity.forceTrueColor = false;
+        // }
     }
 
     // Метод для отрисовки списка игроков (снова используется)

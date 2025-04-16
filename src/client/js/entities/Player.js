@@ -23,6 +23,7 @@ export class Player {
         this.ammo = 10; // Начальное количество патронов
         this.maxAmmo = 10; // Максимальное количество патронов
         this.id = null; // ID игрока с сервера
+        this.isSelf = false; // Флаг, является ли эта сущность локальным игроком
 
         // Параметры дробовика
         this.shotgunPellets = 8;
@@ -130,23 +131,25 @@ export class Player {
 
         let originalColor = this.color; 
         let renderColor = originalColor; 
+        let healthBasedColor = originalColor; // Рассчитаем цвет по ХП в любом случае
+
+        // Расчет цвета по ХП (как для Хищника, смотрящего на себя)
+        const healthPercent = Math.max(0, Math.min(1, this.currentHealth / this.maxHealth));
+        const fullHealthColor = { r: 78, g: 87, b: 40 }; 
+        const zeroHealthColor = { r: 120, g: 0, b: 0 }; 
+        const r = Math.round(fullHealthColor.r + (zeroHealthColor.r - fullHealthColor.r) * (1 - healthPercent));
+        const g = Math.round(fullHealthColor.g + (zeroHealthColor.g - fullHealthColor.g) * (1 - healthPercent));
+        const b = Math.round(fullHealthColor.b + (zeroHealthColor.b - fullHealthColor.b) * (1 - healthPercent));
+        healthBasedColor = `rgb(${r}, ${g}, ${b})`;
 
         if (isViewerPredator && !isSelf && !this.isPredator) {
              // Хищник смотрит на Охотника -> серый цвет
              renderColor = 'rgb(128, 128, 128)';
         } else if (isSelf && this.isPredator) {
             // Хищник смотрит на себя -> цвет по здоровью
-            const healthPercent = Math.max(0, Math.min(1, this.currentHealth / this.maxHealth));
-            // Логика цвета КАК У ФОНА ОХОТНИКА 
-            const fullHealthColor = { r: 78, g: 87, b: 40 }; 
-            const zeroHealthColor = { r: 120, g: 0, b: 0 }; 
-            const r = Math.round(fullHealthColor.r + (zeroHealthColor.r - fullHealthColor.r) * (1 - healthPercent));
-            const g = Math.round(fullHealthColor.g + (zeroHealthColor.g - fullHealthColor.g) * (1 - healthPercent));
-            const b = Math.round(fullHealthColor.b + (zeroHealthColor.b - fullHealthColor.b) * (1 - healthPercent));
-            renderColor = `rgb(${r}, ${g}, ${b})`; 
-            // console.log(`[Self Predator Render] HP: ${this.currentHealth}/${this.maxHealth} (${healthPercent.toFixed(2)}%), Calculated Color: ${renderColor}`); 
+             renderColor = healthBasedColor;
         } 
-        // Иначе renderColor остается originalColor
+        // Иначе renderColor остается originalColor (для Охотника, смотрящего на Охотника или себя)
 
         ctx.save();
         ctx.translate(this.x, this.y);
