@@ -192,6 +192,21 @@
             pointer-events: none; /* Пропускает клики */
             z-index: 50; /* Над канвасом, под UI */
         }
+
+        /* Стили для счетчика FPS (по аналогии с таймером) */
+        #fps-counter {
+            position: absolute;
+            bottom: 10px; /* Отступ снизу */
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            z-index: 100; /* Поверх канваса */
+        }
     </style>
 </head>
 <body>
@@ -232,6 +247,9 @@
         Загрузка правил...
     </div>
     
+    <!-- Элемент для счетчика FPS -->
+    <div id="fps-counter">FPS: --</div>
+
     <!-- Контейнер для правого баннера - УДАЛЯЕМ -->
     <!--
     <div id="ad-container-right" class="ad-container-side">

@@ -136,6 +136,11 @@ class Game {
         this.fullscreenButton = document.getElementById('fullscreen-btn'); // Кэшируем кнопку
         this.staticFogViewRadiusPx = 300; // Начальное значение, обновится при ресайзе
 
+        // --- FPS Counter --- 
+        this.fpsCounterElement = document.getElementById('fps-counter');
+        this.frameTimes = []; // Array to store frame timestamps
+        this.fps = 0; // Calculated FPS value
+
         // НЕ подключаемся и не запускаем цикл здесь
         // this.setupSocketListeners();
         // this.initGame(); 
@@ -581,6 +586,25 @@ class Game {
         }
         this.interpolateEntities(); 
         this.render(input); 
+        this.updateFps(timestamp); // <-- Обновляем FPS
+    }
+
+    // --- Новая функция для обновления FPS ---
+    updateFps(timestamp) {
+        const now = timestamp; // performance.now() уже передается как timestamp
+        // Удаляем старые временные метки (старше 1 секунды)
+        while (this.frameTimes.length > 0 && this.frameTimes[0] <= now - 1000) {
+            this.frameTimes.shift();
+        }
+        // Добавляем текущую временную метку
+        this.frameTimes.push(now);
+        // FPS - это количество кадров за последнюю секунду
+        this.fps = this.frameTimes.length;
+
+        // Обновляем текст элемента
+        if (this.fpsCounterElement) {
+            this.fpsCounterElement.textContent = `FPS: ${this.fps}`;
+        }
     }
 
     update(deltaTime) {
