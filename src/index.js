@@ -243,6 +243,8 @@ const BONUS_SPAWN_PADDING = 50; // Отступ от края мира для с
 const BONUS_WALL_BUFFER = BONUS_RADIUS + playerRadius + 10; // Буфер от стен (бонус + игрок + запас)
 const MIN_BONUS_DISTANCE = 250; // Минимальное расстояние между бонусами
 const MIN_BONUS_DISTANCE_SQ = MIN_BONUS_DISTANCE * MIN_BONUS_DISTANCE; // Квадрат расстояния для оптимизации
+const MIN_SPAWN_DISTANCE_FROM_PREDATOR = 500; // Минимальное расстояние спавна Охотника от Хищника
+const MIN_SPAWN_DISTANCE_FROM_PREDATOR_SQ = MIN_SPAWN_DISTANCE_FROM_PREDATOR * MIN_SPAWN_DISTANCE_FROM_PREDATOR;
 
 // --- Хелпер-функция для расчета здоровья Хищника ---
 function calculatePredatorMaxHealth(numPlayers) {
@@ -288,12 +290,22 @@ io.on('connection', (socket) => {
         const numPlayersTotal = Object.keys(players).length + 1;
         const initialMaxHealth = isPredator ? calculatePredatorMaxHealth(numPlayersTotal) : hunterBaseHealth;
 
+        // Находим Хищника (если он есть и спавнится Охотник)
+        let predator = null;
+        if (!isPredator) { // Ищем только если спавнится Охотник
+            const predatorId = Object.keys(players).find(id => players[id].isPredator);
+            if (predatorId) {
+                predator = players[predatorId];
+            }
+        }
+
         // --- Генерация безопасной точки спавна внутри границ карты ---
         const boundaryVertices = mapGenerator.getBoundaryVertices();
         let spawnX, spawnY;
         let attempts = 0;
         const maxSpawnAttempts = 100; // Предохранитель от бесконечного цикла
         let collisionWithBoundary; // Объявляем переменную ЗДЕСЬ
+        let tooCloseToPredator = false; // <-- Объявляем переменную ЗДЕСЬ и инициализируем
 
         do {
             collisionWithBoundary = false; // Сбрасываем флаг в начале итерации
@@ -316,8 +328,21 @@ io.on('connection', (socket) => {
                     }
                 }
             }
-            // Продолжаем цикл, если точка НЕ внутри полигона ИЛИ есть столкновение с границей
-        } while (!isPointInsidePolygon({ x: spawnX, y: spawnY }, boundaryVertices) || collisionWithBoundary);
+            
+            // --- НОВАЯ ПРОВЕРКА: Расстояние до Хищника ---
+            tooCloseToPredator = false; // Сбрасываем флаг в начале проверки
+            if (predator) { // Проверяем только если Хищник есть
+                const dxPred = spawnX - predator.x;
+                const dyPred = spawnY - predator.y;
+                const distSqPred = dxPred * dxPred + dyPred * dyPred;
+                if (distSqPred < MIN_SPAWN_DISTANCE_FROM_PREDATOR_SQ) {
+                    tooCloseToPredator = true;
+                }
+            }
+            // --- КОНЕЦ ПРОВЕРКИ РАССТОЯНИЯ ---
+
+            // Продолжаем цикл, если точка НЕ внутри полигона ИЛИ есть столкновение с границей ИЛИ слишком близко к Хищнику
+        } while (!isPointInsidePolygon({ x: spawnX, y: spawnY }, boundaryVertices) || collisionWithBoundary || tooCloseToPredator);
 
         // console.log(`Spawn point found after ${attempts} attempts: (${spawnX.toFixed(0)}, ${spawnY.toFixed(0)})`);
         // --- Конец генерации точки спавна ---
@@ -471,6 +496,9 @@ io.on('connection', (socket) => {
                             
                             // --- ПРОВЕРКА СМЕРТИ ПОСЛЕ АТАКИ ХИЩНИКА ---
                             if (target.health <= 0) {
+                                // Отправляем событие конкретному игроку ПЕРЕД удалением
+                                console.log(`[Server] Predator kill: Emitting 'youDied' to ${target.id} (Killer: Predator)`); // DEBUG LOG
+                                io.to(target.id).emit('youDied', { killerType: 'Predator' });
                                 handlePlayerDeath(target); // Обрабатываем смерть немедленно
                                 // target уже удален из players внутри handlePlayerDeath, дальнейшая обработка не нужна для него в этом цикле
                             }
@@ -769,11 +797,17 @@ setInterval(() => {
                 if (distSq < radiiSumSq) {
                     // Столкновение!
                     player.health -= bullet.damage;
-                    // if (player.health < 0) player.health = 0; // Проверка будет в handlePlayerDeath если нужно
                     shouldRemoveBullet = true; // Помечаем пулю на удаление после попадания
                     
                     // --- ПРОВЕРКА СМЕРТИ ПОСЛЕ ПОПАДАНИЯ ПУЛИ ---
                     if (player.health <= 0) {
+                        // Определяем тип убийцы (владельца пули)
+                        const killer = players[bullet.ownerId];
+                        const killerType = killer ? (killer.isPredator ? 'Predator' : 'Hunter') : 'Unknown'; // Если владелец не найден
+                        // Отправляем событие конкретному игроку ПЕРЕД удалением
+                        console.log(`[Server] Bullet kill: Emitting 'youDied' to ${player.id} (Killer: ${killerType})`); // DEBUG LOG
+                        io.to(player.id).emit('youDied', { killerType: killerType }); 
+                        
                         handlePlayerDeath(player); // Обрабатываем смерть немедленно
                         // player будет удален из players внутри handlePlayerDeath
                     }
@@ -878,6 +912,18 @@ setInterval(() => {
                     if (tooCloseToOtherBonus) {
                         continue; // Слишком близко к другому бонусу
                     }
+
+                    // --- НОВАЯ ПРОВЕРКА: Расстояние до Хищника ---
+                    let tooCloseToPredator = false;
+                    if (predator) { // Проверяем только если Хищник есть
+                        const dxPred = spawnX - predator.x;
+                        const dyPred = spawnY - predator.y;
+                        const distSqPred = dxPred * dxPred + dyPred * dyPred;
+                        if (distSqPred < MIN_SPAWN_DISTANCE_FROM_PREDATOR_SQ) {
+                            tooCloseToPredator = true;
+                        }
+                    }
+                    // --- КОНЕЦ ПРОВЕРКИ РАССТОЯНИЯ ---
 
                     isValidSpawn = true; // Точка подходит
 

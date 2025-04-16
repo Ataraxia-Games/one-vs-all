@@ -112,6 +112,8 @@ class Game {
         this.predatorAttackChargeSpeed = 1.0; // Скорость заряда (% / сек)
         this.predatorBaseAttackRange = 75; // Базовая дальность атаки (было 50)
         this.predatorHighlightColor = null; // <-- Add property to store highlight color
+        this.predatorVisualAttackCooldownEndTime = 0; // Cooldown for the *visual* effect
+        this.predatorAttackVisualEffect = null; // Stores active visual effect data { startTime, charge, angle }
 
         // Predator fake trail properties
         this.predatorFakeTrailCooldown = 100; // ms cooldown
@@ -314,10 +316,12 @@ class Game {
         // --- НОВЫЙ ОБРАБОТЧИК: Смерть игрока ---
         this.socket.on('playerDied', (playerId) => {
             // console.log(`[Player Died Event] Received for ${playerId}`);
-            if (playerId === this.myPlayerId) {
+            // if (playerId === this.myPlayerId) { // <-- REMOVED: Handled by 'youDied' now
                 // Если умер наш игрок, вызываем стандартную процедуру
-                this.handleDisconnectionOrDeath("Вы погибли!");
-            } else {
+                // this.handleDisconnectionOrDeath("Вы погибли!");
+            // } else {
+            // Обрабатываем смерть ТОЛЬКО ДРУГИХ игроков
+            if (playerId !== this.myPlayerId) {
                 // Если умер другой игрок, удаляем его сущность
                 const entity = this.playerEntities[playerId];
                 if (entity) {
@@ -331,6 +335,19 @@ class Game {
                     delete this.playerEntities[playerId]; // Удаляем из списка сущностей
                 }
             }
+        });
+
+        // --- НОВЫЙ ОБРАБОТЧИК: Нас убили ---
+        this.socket.on('youDied', (data) => {
+            // console.log("[You Died Event] Received:", data);
+            let deathMessage = "Вы погибли!"; // Сообщение по умолчанию
+            if (data && data.killerType === 'Predator') {
+                deathMessage = "Вы пали в бою с Хищником";
+            } else if (data && data.killerType === 'Hunter') {
+                deathMessage = "Вы погибли от выстрела Охотника";
+            }
+            // Вызываем общую функцию с нужным сообщением
+            this.handleDisconnectionOrDeath(deathMessage);
         });
     }
 
@@ -722,9 +739,35 @@ class Game {
             if (this.player && !this.player.isPredator) {
                 this.socket.emit('playerShoot'); // Охотник стреляет
             } else if (this.player && this.player.isPredator) {
+                // --- Trigger attack visual effect (with cooldown) ---
+                const now = performance.now();
+                if (now > this.predatorVisualAttackCooldownEndTime) {
+                    // Store data for the visual effect
+                    this.predatorAttackVisualEffect = {
+                        startTime: now,
+                        charge: this.predatorAttackCharge, // Use charge *before* reset
+                        angle: this.player.angle
+                    };
+                    // Set the visual cooldown
+                    this.predatorVisualAttackCooldownEndTime = now + 1000; // 1 second visual CD
+                    
+                    // Send attack to server and reset actual charge
+                    this.socket.emit('predatorAttack');
+                    this.predatorAttackCharge = 0; 
+                } else {
+                    // Visual cooldown active, do nothing visually or for server
+                }
+                // --- Old logic ---
+                /*
                 // Отправляем атаку и сбрасываем заряд
-                this.socket.emit('predatorAttack'); 
-                this.predatorAttackCharge = 0; // Сброс заряда
+                // Actually, let's store charge *before* reset for the visual
+                const chargeAtAttack = this.predatorAttackCharge;
+                this.socket.emit('predatorAttack');
+                // Store the charge *before* resetting it for the visual effect
+                this.predatorAttackEffectCharge = chargeAtAttack; 
+                this.predatorAttackEffectEndTime = performance.now() + 150; // Show effect for 150ms
+                this.predatorAttackCharge = 0; // Reset charge *after* storing for visual and emitting
+                */
             }
         }
         
@@ -1201,36 +1244,11 @@ class Game {
                 this.ctx.arc(input.rawMouseX, input.rawMouseY, scaledRadius, 0, Math.PI * 2);
                 this.ctx.stroke();
             } else {
-                // --- Курсор Хищника (ПОЛОСКА) ---
-                this.ctx.lineWidth = 3; // Толщина 3
-                const currentAttackRange = this.predatorBaseAttackRange * this.predatorAttackCharge;
-                const cursorWidthAngle = Math.PI / 8; // Угол, определяющий ширину полоски (22.5 градуса в каждую сторону)
-                
-                // Рассчитываем 2 точки для краев полоски в мировых координатах
-                const angleLeft = this.player.angle - cursorWidthAngle / 2;
-                const angleRight = this.player.angle + cursorWidthAngle / 2;
-                
-                const pointLeftXWorld = this.player.x + currentAttackRange * Math.cos(angleLeft);
-                const pointLeftYWorld = this.player.y + currentAttackRange * Math.sin(angleLeft);
-                const pointRightXWorld = this.player.x + currentAttackRange * Math.cos(angleRight);
-                const pointRightYWorld = this.player.y + currentAttackRange * Math.sin(angleRight);
-
-                // Переводим в экранные координаты
-                // const cameraX = this.canvas.width / 2 - this.player.x * this.zoom; // Уже есть выше
-                // const cameraY = this.canvas.height / 2 - this.player.y * this.zoom;
-                const pointLeftXScreen = cameraX + pointLeftXWorld * this.zoom;
-                const pointLeftYScreen = cameraY + pointLeftYWorld * this.zoom;
-                const pointRightXScreen = cameraX + pointRightXWorld * this.zoom;
-                const pointRightYScreen = cameraY + pointRightYWorld * this.zoom;
-                
-                this.ctx.strokeStyle = '#ffffff'; // Белый цвет
-                this.ctx.beginPath();
-                this.ctx.moveTo(pointLeftXScreen, pointLeftYScreen);
-                this.ctx.lineTo(pointRightXScreen, pointRightYScreen);
-                this.ctx.stroke();
+                // --- Курсор Хищника (УДАЛЯЕМ ВЕСЬ ЭТОТ БЛОК) ---
+                /* Entire old predator cursor logic removed */
             }
         }
-        // --- КОНЕЦ РИСОВАНИЯ КУРСОРА ---
+        // --- КОНЕЦ СТАРОГО РИСОВАНИЯ КУРСОРА ---
 
         // --- РИСУЕМ ВТОРОЙ КУРСОР ХИЩНИКА (КРУГ на месте мыши) --- 
         if (this.player && this.player.isPredator && input && input.rawMouseX !== undefined) {
@@ -1241,6 +1259,85 @@ class Game {
             this.ctx.stroke();
         }
         // --- КОНЕЦ ВТОРОГО КУРСОРА --- 
+
+        // --- НОВЫЙ КОД: Отрисовка эффекта атаки Хищника ---
+        if (this.player && this.player.isPredator && performance.now() < this.predatorVisualAttackCooldownEndTime) {
+            // Используем сохраненный заряд для расчета дальности в МОМЕНТ атаки
+            const attackRange = this.predatorBaseAttackRange * this.predatorAttackVisualEffect.charge; 
+            const cursorWidthAngle = Math.PI / 8; // Угол для определения концов "дуги"
+            const lineLength = 20; // Длина перпендикулярных линий
+            // const perpendicularAngle = this.player.angle + Math.PI / 2; // Угол перпендикуляра (может быть не тот)
+            // Рассчитаем векторы перпендикуляров для каждой точки отдельно
+
+            // Углы для точек на концах "дуги"
+            const angleLeft = this.player.angle - cursorWidthAngle / 2;
+            const angleRight = this.player.angle + cursorWidthAngle / 2;
+
+            // Точки на концах "дуги" в мировых координатах
+            const pointLeftXWorld = this.player.x + attackRange * Math.cos(angleLeft);
+            const pointLeftYWorld = this.player.y + attackRange * Math.sin(angleLeft);
+            const pointRightXWorld = this.player.x + attackRange * Math.cos(angleRight);
+            const pointRightYWorld = this.player.y + attackRange * Math.sin(angleRight);
+
+            // Вектор направления от центра к точкам на дуге
+            const dirLeftX = pointLeftXWorld - this.player.x;
+            const dirLeftY = pointLeftYWorld - this.player.y;
+            const dirRightX = pointRightXWorld - this.player.x;
+            const dirRightY = pointRightYWorld - this.player.y;
+
+            // Нормализуем векторы (на всякий случай, хотя они должны быть attackRange длины)
+            const lenLeft = Math.sqrt(dirLeftX * dirLeftX + dirLeftY * dirLeftY) || 1;
+            const normLeftX = dirLeftX / lenLeft;
+            const normLeftY = dirLeftY / lenLeft;
+            const lenRight = Math.sqrt(dirRightX * dirRightX + dirRightY * dirRightY) || 1;
+            const normRightX = dirRightX / lenRight;
+            const normRightY = dirRightY / lenRight;
+
+            // Перпендикулярные векторы (поворот на 90 градусов)
+            // Умножение на lineLength сразу
+            const perpLeftX = -normLeftY * lineLength;
+            const perpLeftY = normLeftX * lineLength;
+            const perpRightX = -normRightY * lineLength;
+            const perpRightY = normRightX * lineLength;
+
+            // Конечные точки перпендикулярных линий
+            const perpLeftEndX = pointLeftXWorld + perpLeftX;
+            const perpLeftEndY = pointLeftYWorld + perpLeftY;
+            const perpRightEndX = pointRightXWorld + perpRightX;
+            const perpRightEndY = pointRightYWorld + perpRightY;
+
+            // Переводим в экранные координаты (камера уже есть)
+            const pointLeftXScreen = cameraX + pointLeftXWorld * this.zoom;
+            const pointLeftYScreen = cameraY + pointLeftYWorld * this.zoom;
+            const pointRightXScreen = cameraX + pointRightXWorld * this.zoom;
+            const pointRightYScreen = cameraY + pointRightYWorld * this.zoom;
+            const perpLeftEndXScreen = cameraX + perpLeftEndX * this.zoom;
+            const perpLeftEndYScreen = cameraY + perpLeftEndY * this.zoom;
+            const perpRightEndXScreen = cameraX + perpRightEndX * this.zoom;
+            const perpRightEndYScreen = cameraY + perpRightEndY * this.zoom;
+
+            // Получаем цвет Хищника по ХП (как в Player.render)
+            const healthPercent = Math.max(0, Math.min(1, this.player.currentHealth / this.player.maxHealth));
+            const fullHealthColor = { r: 78, g: 87, b: 40 }; 
+            const zeroHealthColor = { r: 120, g: 0, b: 0 }; 
+            const r = Math.round(fullHealthColor.r + (zeroHealthColor.r - fullHealthColor.r) * (1 - healthPercent));
+            const g = Math.round(fullHealthColor.g + (zeroHealthColor.g - fullHealthColor.g) * (1 - healthPercent));
+            const b = Math.round(fullHealthColor.b + (zeroHealthColor.b - fullHealthColor.b) * (1 - healthPercent));
+            const healthColor = `rgb(${r}, ${g}, ${b})`;
+
+            // Рисуем линии
+            this.ctx.strokeStyle = healthColor;
+            this.ctx.lineWidth = 2; // Толщина линий
+            this.ctx.beginPath();
+            // Левая линия
+            this.ctx.moveTo(pointLeftXScreen, pointLeftYScreen);
+            this.ctx.lineTo(perpLeftEndXScreen, perpLeftEndYScreen);
+            // Правая линия
+            this.ctx.moveTo(pointRightXScreen, pointRightYScreen);
+            this.ctx.lineTo(perpRightEndXScreen, perpRightEndYScreen);
+            this.ctx.stroke();
+        }
+        // --- КОНЕЦ ЭФФЕКТА АТАКИ ---
 
         // --- Обновление таймера дня/ночи --- 
         if (this.dayNightTimerElement) {

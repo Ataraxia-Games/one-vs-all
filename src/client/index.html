@@ -204,13 +204,14 @@
 
     <!-- Интерфейс входа -->
     <div id="join-ui">
+        <!-- Переносим сообщение об ошибке сюда -->
+        <p id="joinError" style="color: red; display: none;"></p> 
         <h2>Введите ваше имя:</h2>
         <input type="text" id="playerNameInput" placeholder="Имя игрока" maxlength="16"/>
         <button id="joinButton">Присоединиться</button>
         <div id="rules-on-join-screen" class="rules-display">
             Загрузка правил...
         </div> 
-        <p id="joinError" style="color: red; display: none;"></p>
     </div>
     
     <!-- Элемент для таймера дня/ночи -->
