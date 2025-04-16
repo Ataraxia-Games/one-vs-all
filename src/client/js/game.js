@@ -313,6 +313,28 @@ class Game {
                 delete this.bonusEntities[bonusId];
             }
         });
+
+        // --- НОВЫЙ ОБРАБОТЧИК: Смерть игрока ---
+        this.socket.on('playerDied', (playerId) => {
+            // console.log(`[Player Died Event] Received for ${playerId}`);
+            if (playerId === this.myPlayerId) {
+                // Если умер наш игрок, вызываем стандартную процедуру
+                this.handleDisconnectionOrDeath("Вы погибли!");
+            } else {
+                // Если умер другой игрок, удаляем его сущность
+                const entity = this.playerEntities[playerId];
+                if (entity) {
+                    this.gameEngine.removeEntity(entity);
+                    // console.log(`Removed entity for dead player ${playerId}`);
+                }
+                if (this.players[playerId]) {
+                    delete this.players[playerId]; // Удаляем из локального списка
+                }
+                 if (this.playerEntities[playerId]) {
+                    delete this.playerEntities[playerId]; // Удаляем из списка сущностей
+                }
+            }
+        });
     }
 
     // Синхронизирует локальные сущности с серверным состоянием players
@@ -452,7 +474,9 @@ class Game {
         serverBonuses.forEach(serverBonus => {
             if (!this.bonusEntities[serverBonus.id]) {
                 // Создаем новую сущность Bonus
-                const bonusEntity = new Bonus(serverBonus.id, serverBonus.x, serverBonus.y);
+                // const bonusEntity = new Bonus(serverBonus.id, serverBonus.x, serverBonus.y);
+                // Передаем тип и количество в конструктор
+                const bonusEntity = new Bonus(serverBonus.id, serverBonus.x, serverBonus.y, serverBonus.type, serverBonus.amount);
                 this.bonusEntities[serverBonus.id] = bonusEntity;
                 this.gameEngine.addEntity(bonusEntity); // Добавляем в движок для рендеринга
             } else {
@@ -547,6 +571,15 @@ class Game {
 
     update(deltaTime) {
         if (!this.myPlayerId || !this.player) return {}; // Возвращаем пустой объект, если не готовы
+
+        // --- Проверка смерти локального игрока (УДАЛЕНО) ---
+        /*
+        if (this.player && this.player.currentHealth <= 0) {
+            this.handleDisconnectionOrDeath("Вы погибли!");
+            return; // Прерываем текущий кадр
+        }
+        */
+        // --- Конец проверки --- 
 
         // --- Константа радиуса бонуса (нужна для логики сбора) ---
         const BONUS_RADIUS = 15; // Должна совпадать с серверной/Bonus.js

@@ -36,7 +36,7 @@ function calculateWallCorners(wall) {
 function checkCircleWallCollision(circle, wall) {
     // Убедимся, что у стены есть углы для расчета
     if (!wall.corners) {
-        console.warn("Collision check failed: wall missing corners property.", wall);
+        // console.warn("Collision check failed: wall missing corners property.", wall);
         return { collided: false };
     }
     // 1. Transform circle center to wall's local coordinate system
@@ -218,7 +218,7 @@ const worldHeight = 2000 * 1.3;
 // Генерируем стены ОДИН РАЗ при старте сервера
 const mapGenerator = new MapGenerator(worldWidth, worldHeight);
 const serverWalls = mapGenerator.getWalls(); // Теперь содержит стены с углами
-console.log(`Generated ${serverWalls.length} walls on the server.`);
+// console.log(`Generated ${serverWalls.length} walls on the server.`);
 const playerSpeed = 200; 
 const playerRadius = 15;
 const hunterBaseHealth = 100; // Базовое здоровье Охотника
@@ -241,6 +241,8 @@ let cycleCounter = 1; // <-- Счетчик циклов дня/ночи
 const BONUS_RADIUS = 15; // Такой же как у игрока?
 const BONUS_SPAWN_PADDING = 50; // Отступ от края мира для спавна
 const BONUS_WALL_BUFFER = BONUS_RADIUS + playerRadius + 10; // Буфер от стен (бонус + игрок + запас)
+const MIN_BONUS_DISTANCE = 250; // Минимальное расстояние между бонусами
+const MIN_BONUS_DISTANCE_SQ = MIN_BONUS_DISTANCE * MIN_BONUS_DISTANCE; // Квадрат расстояния для оптимизации
 
 // --- Хелпер-функция для расчета здоровья Хищника ---
 function calculatePredatorMaxHealth(numPlayers) {
@@ -249,12 +251,12 @@ function calculatePredatorMaxHealth(numPlayers) {
 }
 
 io.on('connection', (socket) => {
-    console.log(`A user connected: ${socket.id}`);
+    // console.log(`A user connected: ${socket.id}`);
     // НЕ СОЗДАЕМ игрока здесь, ждем 'joinGame'
 
     socket.on('joinGame', (data) => {
         const playerName = data.name ? String(data.name).trim().slice(0, 16) : `Player_${socket.id.slice(0, 4)}`;
-        console.log(`Player ${socket.id} trying to join as "${playerName}"`);
+        // console.log(`Player ${socket.id} trying to join as \"${playerName}\"`);
 
         // --- Проверка на уникальность имени --- 
         const lowerCaseName = playerName.toLowerCase();
@@ -267,7 +269,7 @@ io.on('connection', (socket) => {
         }
 
         if (nameTaken) {
-            console.log(`Join attempt failed: Name "${playerName}" is already taken.`);
+            // console.log(`Join attempt failed: Name \"${playerName}\" is already taken.`);
             socket.emit('joinError', { message: 'Это имя уже занято!' });
             // Не отключаем сокет сразу, даем клиенту обработать ошибку
             return; // Прерываем обработку joinGame
@@ -279,7 +281,7 @@ io.on('connection', (socket) => {
         if (!predatorAssigned) {
             isPredator = true;
             predatorAssigned = true;
-            console.log(`Player "${playerName}" (${socket.id}) is the PREDATOR!`);
+            // console.log(`Player \"${playerName}\" (${socket.id}) is the PREDATOR!`);
         }
 
         // Рассчитываем начальное здоровье
@@ -300,7 +302,7 @@ io.on('connection', (socket) => {
             spawnY = 100 + Math.random() * (worldHeight - 200);
             attempts++;
             if (attempts > maxSpawnAttempts) {
-                console.warn(`Failed to find valid spawn point after ${maxSpawnAttempts} attempts. Spawning near center.`);
+                // console.warn(`Failed to find valid spawn point after ${maxSpawnAttempts} attempts. Spawning near center.`);
                 spawnX = worldWidth / 2; // Запасной вариант
                 spawnY = worldHeight / 2;
                 break;
@@ -317,7 +319,7 @@ io.on('connection', (socket) => {
             // Продолжаем цикл, если точка НЕ внутри полигона ИЛИ есть столкновение с границей
         } while (!isPointInsidePolygon({ x: spawnX, y: spawnY }, boundaryVertices) || collisionWithBoundary);
 
-        console.log(`Spawn point found after ${attempts} attempts: (${spawnX.toFixed(0)}, ${spawnY.toFixed(0)})`);
+        // console.log(`Spawn point found after ${attempts} attempts: (${spawnX.toFixed(0)}, ${spawnY.toFixed(0)})`);
         // --- Конец генерации точки спавна ---
 
         // Создаем игрока
@@ -348,7 +350,7 @@ io.on('connection', (socket) => {
                 const newPredatorMaxHealth = calculatePredatorMaxHealth(Object.keys(players).length);
                 players[predatorId].maxHealth = newPredatorMaxHealth;
                 players[predatorId].health = newPredatorMaxHealth; // Исцеляем до нового максимума
-                console.log(`Predator ${players[predatorId].name} health updated to ${newPredatorMaxHealth} due to new Hunter.`);
+                // console.log(`Predator ${players[predatorId].name} health updated to ${newPredatorMaxHealth} due to new Hunter.`);
             }
         }
 
@@ -364,7 +366,7 @@ io.on('connection', (socket) => {
 
         // Отправляем всем ОСТАЛЬНЫМ информацию о новом игроке
         socket.broadcast.emit('playerConnected', players[socket.id]);
-        console.log(`Player "${playerName}" (${socket.id}) joined. Total players: ${Object.keys(players).length}`);
+        // console.log(`Player \"${playerName}\" (${socket.id}) joined. Total players: ${Object.keys(players).length}`);
     });
 
     // Обработка получения ввода от клиента
@@ -395,30 +397,31 @@ io.on('connection', (socket) => {
             return; // Нет патронов
         }
 
-        console.log(`Player ${socket.id} shoots!`);
+        // console.log(`Player ${socket.id} shoots!`);
         player.lastShotTime = now; // Обновляем время последнего выстрела
         player.ammo--; // Уменьшаем патроны
 
-        // Создаем пули (дробовик)
+        // Создаем пули для дробовика
         for (let i = 0; i < shotgunPellets; i++) {
             const spreadAngle = player.angle + (Math.random() - 0.5) * shotgunSpread;
-            // Создаем пулю чуть впереди игрока
-            const startX = player.x + Math.cos(player.angle) * (playerRadius + 5); 
+            const startX = player.x + Math.cos(player.angle) * (playerRadius + 5);
             const startY = player.y + Math.sin(player.angle) * (playerRadius + 5);
-            
+
             const newBullet = {
                 id: nextBulletId++,
-                ownerId: player.id,
+                ownerId: socket.id, // Добавляем ID владельца
                 x: startX,
                 y: startY,
                 angle: spreadAngle,
                 speed: bulletSpeed,
-                spawnTime: now, // Время создания для расчета времени жизни
+                radius: bulletRadius, // Используем радиус пули
+                damage: bulletDamage, // Используем урон пули
+                spawnTime: Date.now(),
                 lifetime: bulletLifetime,
-                radius: bulletRadius, // <-- Добавляем радиус
-                isActive: true
+                hasPenetrated: false, // <-- Флаг для пробития стены
+                // isActive: true // <-- REMOVED isActive flag
             };
-            bullets.push(newBullet); // Добавляем пулю в массив
+            bullets.push(newBullet);
         }
     });
 
@@ -436,7 +439,7 @@ io.on('connection', (socket) => {
                 return; // Атака на кулдауне
             }
             player.lastAttackTime = now; 
-            console.log(`[Attack] Predator ${player.name} (${socket.id}) initiated attack.`);
+            // console.log(`[Attack] Predator ${player.name} (${socket.id}) initiated attack.`);
             
             let hitDetected = false; // Флаг, что мы кого-то ударили
             // --- Логика поиска цели и урона --- 
@@ -444,7 +447,7 @@ io.on('connection', (socket) => {
                 if (targetId === socket.id) continue; // Не атакуем себя
                 const target = players[targetId];
                 // Атакуем только живых Охотников
-                if (!target.isPredator && target.health > 0) { 
+                if (target && !target.isPredator && target.health > 0) { // Добавили проверку на существование target
                     const dx = target.x - player.x;
                     const dy = target.y - player.y;
                     const distSq = dx * dx + dy * dy;
@@ -461,10 +464,17 @@ io.on('connection', (socket) => {
                         if (Math.abs(angleDiff) <= attackAngleSpread / 2) {
                             // --- Попадание! ---
                             hitDetected = true;
-                            console.log(`[Attack Hit] Predator ${player.name} hit ${target.name}`);
+                            // console.log(`[Attack Hit] Predator ${player.name} hit ${target.name}`);
                             target.health -= predatorAttackDamage;
-                            target.health = Math.max(0, target.health); // Не уходим в минус
+                            // target.health = Math.max(0, target.health); // Не уходим в минус - Math.max убран, проверка смерти ниже
                             // gameStateUpdate отправит новое здоровье всем
+                            
+                            // --- ПРОВЕРКА СМЕРТИ ПОСЛЕ АТАКИ ХИЩНИКА ---
+                            if (target.health <= 0) {
+                                handlePlayerDeath(target); // Обрабатываем смерть немедленно
+                                // target уже удален из players внутри handlePlayerDeath, дальнейшая обработка не нужна для него в этом цикле
+                            }
+                            // --- КОНЕЦ ПРОВЕРКИ СМЕРТИ ---
                         }
                     }
                 }
@@ -507,12 +517,19 @@ io.on('connection', (socket) => {
         }
 
         const bonus = bonuses[bonusIndex];
-        console.log(`[Bonus Collect] Player ${player.name} requests collection of bonus ${bonus.id}`);
+        // console.log(`[Bonus Collect] Player ${player.name} requests collection of bonus ${bonus.id}`);
 
         // Выдаем награду (патроны)
-        const ammoGain = Math.floor(Math.random() * 4) + 2; // 2-5 патронов
+        let ammoGain = 0;
+        if (bonus.type === 'ammo' && bonus.amount) {
+            ammoGain = bonus.amount;
+        } else {
+            // Старый бонус (или тип не указан) - даем случайное кол-во
+            ammoGain = Math.floor(Math.random() * 4) + 2; 
+        }
+        
         player.ammo = Math.min(player.maxAmmo, player.ammo + ammoGain);
-        console.log(`[Bonus Collect] Player ${player.name} gained ${ammoGain} ammo. Current: ${player.ammo}/${player.maxAmmo}`);
+        // console.log(`[Bonus Collect] Player ${player.name} gained ${ammoGain} ammo (Type: ${bonus.type || 'night'}). Current: ${player.ammo}/${player.maxAmmo}`);
         
         // Удаляем бонус из массива
         bonuses.splice(bonusIndex, 1);
@@ -523,10 +540,10 @@ io.on('connection', (socket) => {
 
     // Обработка отключения
     socket.on('disconnect', () => {
-        console.log(`User disconnected: ${socket.id}`);
+        // console.log(`User disconnected: ${socket.id}`);
         const player = players[socket.id];
         if (player) {
-            console.log(`Player "${player.name}" (${socket.id}) left.`);
+            // console.log(`Player \"${player.name}\" (${socket.id}) left.`);
             const wasPredator = player.isPredator;
             
             // Если отключается ОХОТНИК, обновляем здоровье Хищника
@@ -537,19 +554,74 @@ io.on('connection', (socket) => {
                     const newPredatorMaxHealth = calculatePredatorMaxHealth(Object.keys(players).length - 1);
                     players[predatorId].maxHealth = newPredatorMaxHealth;
                     players[predatorId].health = Math.min(players[predatorId].health, newPredatorMaxHealth);
-                    console.log(`Predator ${players[predatorId].name} health updated to ${newPredatorMaxHealth} due to Hunter leaving.`);
+                    // console.log(`Predator ${players[predatorId].name} health updated to ${newPredatorMaxHealth} due to Hunter leaving.`);
                 }
             } else {
-                 console.log("Predator disconnected! Resetting assignment.");
+                 // console.log("Predator disconnected! Resetting assignment.");
                  predatorAssigned = false;
             }
             
             delete players[socket.id];
             io.emit('playerDisconnected', socket.id); 
-            console.log(`Total players: ${Object.keys(players).length}`);
+            // console.log(`Total players: ${Object.keys(players).length}`);
         }
     });
 });
+
+// --- Функция обработки смерти игрока ---
+function handlePlayerDeath(player) {
+    if (!player || !players[player.id]) return; // Проверяем, существует ли игрок еще
+    const playerId = player.id; // Сохраняем ID перед удалением
+    const playerName = player.name; // Сохраняем имя для лога
+    console.log(`[Server] handlePlayerDeath START for ${playerName} (${playerId})`); // DEBUG LOG
+
+    // 1. Выпадение патронов (если Охотник)
+    if (!player.isPredator && player.ammo > 0) {
+        const ammoBonus = {
+            id: nextBonusId++, 
+            x: player.x, 
+            y: player.y,
+            type: 'ammo',
+            amount: player.ammo
+        };
+        bonuses.push(ammoBonus);
+        // console.log(`[Ammo Drop] Hunter ${player.name} died, dropped ${player.ammo} ammo.`);
+    }
+
+    // 2. Сброс флага Хищника, если он умер
+    const wasPredator = player.isPredator;
+    if (wasPredator) {
+        // console.log("Predator died! Resetting assignment.");
+        predatorAssigned = false;
+    }
+
+    // 3. Пересчет здоровья Хищника, если умер Охотник
+    const wasHunter = !wasPredator;
+    // Удаляем игрока ДО пересчета
+    if (players[playerId]) {
+        console.log(`[Server] Deleting player ${playerName} (${playerId}) from players object...`); // DEBUG LOG
+        delete players[playerId]; 
+        console.log(`[Server] Player ${playerName} (${playerId}) deleted? Check: ${!players[playerId]}`); // DEBUG LOG
+    } else {
+        console.warn(`[Server] handlePlayerDeath: Player ${playerName} (${playerId}) already deleted?`); // DEBUG LOG
+    }
+    
+    if (wasHunter) {
+        const predatorId = Object.keys(players).find(id => players[id].isPredator); // Ищем Хищника среди ОСТАВШИХСЯ
+        if (predatorId) {
+            const numPlayersRemaining = Object.keys(players).length;
+            const newPredatorMaxHealth = calculatePredatorMaxHealth(numPlayersRemaining);
+            players[predatorId].maxHealth = newPredatorMaxHealth;
+            players[predatorId].health = Math.min(players[predatorId].health, newPredatorMaxHealth);
+            // console.log(`Predator ${players[predatorId].name} health updated to ${newPredatorMaxHealth} due to Hunter death.`);
+        }
+    }
+
+    // 4. Оповещение клиентов о смерти
+    io.emit('playerDied', playerId); 
+    // console.log(`Player ${playerId} removed due to death. Total players: ${Object.keys(players).length}`);
+    console.log(`[Server] handlePlayerDeath END for ${playerName} (${playerId}). Emitted 'playerDied'.`); // DEBUG LOG
+}
 
 // --- Логика обновления игрока на сервере ---
 function updatePlayer(player, dt) {
@@ -622,31 +694,42 @@ function updatePlayer(player, dt) {
 
 // --- Логика обновления пули на сервере ---
 function updateBullet(bullet, dt, walls) {
-    // Движение
-    const moveX = Math.cos(bullet.angle) * bullet.speed * dt;
-    const moveY = Math.sin(bullet.angle) * bullet.speed * dt;
-    const nextX = bullet.x + moveX;
-    const nextY = bullet.y + moveY;
+    const moveDistance = bullet.speed * dt;
+    bullet.x += Math.cos(bullet.angle) * moveDistance;
+    bullet.y += Math.sin(bullet.angle) * moveDistance;
 
-    // Проверка времени жизни
-    const aliveTime = Date.now() - bullet.spawnTime;
-    if (aliveTime > bullet.lifetime) {
-        bullet.isActive = false; // Помечаем для удаления
-        return; // Дальше проверять не нужно
+    // Проверка истечения времени жизни
+    if (Date.now() - bullet.spawnTime > bullet.lifetime) {
+        return true; // Пометить на удаление
     }
 
-    // Проверка столкновений пуля-стена
+    // Проверка столкновений со стенами
     for (const wall of walls) {
-        if (checkCircleWallCollision({ x: nextX, y: nextY, radius: bullet.radius }, wall).collided) {
-            bullet.isActive = false;
-            return; // Пуля исчезает при столкновении со стеной
+        const collisionResult = checkCircleWallCollision(bullet, wall);
+        if (collisionResult.collided) {
+            // --- Логика пробития --- 
+            if (bullet.hasPenetrated) {
+                // Уже пробила одну стену, удаляем
+                return true; 
+            } else {
+                // Первая стена
+                const penetrationChance = Math.random();
+                if (penetrationChance < 0.5) {
+                    // Пробила! (50% шанс)
+                    bullet.hasPenetrated = true;
+                    // НЕ возвращаем true, пуля летит дальше
+                } else {
+                    // Не пробила (50% шанс), удаляем
+                    return true; 
+                }
+            }
+            // --- Конец логики пробития ---
+            // return true; // Старая логика: удаляем при любом столкновении
         }
     }
+    // TODO: Добавить проверку столкновений с игроками (кроме владельца)
 
-    // Обновляем позицию, если не было столкновений
-    bullet.x = nextX;
-    bullet.y = nextY;
-    // TODO: Проверка столкновений пуля-игрок (будет в основном цикле)
+    return false; // Не удалять пулю
 }
 
 // --- Серверный игровой цикл --- 
@@ -655,67 +738,95 @@ setInterval(() => {
     const now = Date.now();
     const dt = (1000 / TICK_RATE) / 1000; 
 
-    // Обновляем всех игроков
+    // 0. Сохраняем предыдущее состояние здоровья (для проверки смерти)
+    /* // <-- Удаляем логику healthBeforeTick
+    Object.values(players).forEach(player => {
+        player.healthBeforeTick = player.health;
+    });
+    */
+
+    // 1. Обновляем всех игроков (движение, атаки Хищника применяются здесь неявно через lastAttackTime)
     Object.values(players).forEach(player => {
         updatePlayer(player, dt);
     });
 
-    // Обновляем все пули (движение, время жизни, столкновения со стенами)
-    bullets.forEach(bullet => {
-        if (bullet.isActive) { 
-            updateBullet(bullet, dt, serverWalls);
+    // 2. Обновляем все пули и проверяем столкновения Пуля-Стена
+    for (let i = bullets.length - 1; i >= 0; i--) {
+        const bullet = bullets[i];
+        let shouldRemoveBullet = updateBullet(bullet, dt, serverWalls);
+
+        // Если пуля еще не удалена (жива и не пробила/ударилась), проверяем столкновения с игроками
+        if (!shouldRemoveBullet) {
+            Object.values(players).forEach(player => {
+                if (!player || player.health <= 0) return; // Пропускаем отсутствующих или мертвых
+                if (bullet.ownerId === player.id) return; // Не сталкиваемся с собой
+
+                const dx = bullet.x - player.x;
+                const dy = bullet.y - player.y;
+                const distSq = dx * dx + dy * dy;
+                const radiiSumSq = (bullet.radius + playerRadius) * (bullet.radius + playerRadius);
+
+                if (distSq < radiiSumSq) {
+                    // Столкновение!
+                    player.health -= bullet.damage;
+                    // if (player.health < 0) player.health = 0; // Проверка будет в handlePlayerDeath если нужно
+                    shouldRemoveBullet = true; // Помечаем пулю на удаление после попадания
+                    
+                    // --- ПРОВЕРКА СМЕРТИ ПОСЛЕ ПОПАДАНИЯ ПУЛИ ---
+                    if (player.health <= 0) {
+                        handlePlayerDeath(player); // Обрабатываем смерть немедленно
+                        // player будет удален из players внутри handlePlayerDeath
+                    }
+                    // --- КОНЕЦ ПРОВЕРКИ СМЕРТИ ---
+                    
+                    // Не используем return здесь, чтобы одна пуля могла теоретически попасть в нескольких (хотя маловероятно)
+                }
+            });
+        }
+
+        // Если пулю нужно удалить (из updateBullet или после попадания в игрока)
+        if (shouldRemoveBullet) {
+            bullets.splice(i, 1); // Удаляем пулю из массива
+        }
+    }
+    
+    // 3. Проверка смерти и выпадение патронов (ПОСЛЕ всех обновлений) <-- УДАЛЯЕМ ЭТОТ БЛОК
+    /*
+    Object.values(players).forEach(player => {
+        if (player.healthBeforeTick > 0 && player.health <= 0 && !player.isPredator) {
+            // Игрок только что умер и это Охотник
+            if (player.ammo > 0) {
+                 const ammoBonus = {
+                    id: nextBonusId++, 
+                    x: player.x, 
+                    y: player.y,
+                    type: 'ammo',
+                    amount: player.ammo
+                };
+                bonuses.push(ammoBonus);
+                // console.log(`[Ammo Drop] Hunter ${player.name} died (Health ${player.healthBeforeTick} -> ${player.health}), dropped ${player.ammo} ammo.`);
+            }
+            // Можно добавить другую логику смерти здесь (например, запуск таймера возрождения)
         }
     });
+    */
 
-    // Проверка столкновений Пуля-Игрок
-    bullets.forEach(bullet => {
-        if (!bullet.isActive) return; // Пропускаем неактивные пули
-
-        Object.values(players).forEach(player => {
-            if (!player || player.health <= 0) return; // Пропускаем отсутствующих или мертвых игроков
-            if (bullet.ownerId === player.id) return; // Игрок не может попасть в себя
-
-            // Простая проверка столкновения кругов
-            const dx = bullet.x - player.x;
-            const dy = bullet.y - player.y;
-            const distSq = dx * dx + dy * dy;
-            const radiiSumSq = (bullet.radius + playerRadius) * (bullet.radius + playerRadius);
-
-            if (distSq < radiiSumSq) {
-                // Столкновение!
-                player.health -= bulletDamage;
-                if (player.health < 0) player.health = 0;
-                bullet.isActive = false; // Пуля исчезает
-                console.log(`Player ${player.id} hit by bullet ${bullet.id}! Health: ${player.health}`);
-                // TODO: Отправить событие о попадании клиентам? (для звука/эффекта)
-                return; // Пуля может поразить только одного игрока за тик
-            }
-        });
-    });
-
-    // Удаляем неактивные пули
-    const activeBullets = bullets.filter(bullet => bullet.isActive);
-    if (activeBullets.length !== bullets.length) {
-        bullets.length = 0; 
-        bullets.push(...activeBullets); 
-    }
-
-    // Обновляем время цикла дня/ночи
+    // 4. Обновляем время цикла дня/ночи
     const previousCycleTime = currentCycleTime;
     currentCycleTime = (currentCycleTime + (1000 / TICK_RATE)) % DAY_NIGHT_CYCLE_DURATION;
     // Если время стало меньше, значит цикл завершился
     if (currentCycleTime < previousCycleTime) {
         cycleCounter++;
-        console.log(`[Cycle] New cycle started: ${cycleCounter}`);
+        // console.log(`[Cycle] New cycle started: ${cycleCounter}`);
     }
 
     // --- Логика спавна бонусов при наступлении ночи --- 
     const isNightNow = currentCycleTime < DAY_NIGHT_CYCLE_DURATION / 2;
     if (!wasNight && isNightNow) { // Если только что наступила ночь
-        console.log("[Night Bonus Spawn] Night has begun. Checking bonuses...");
+        // console.log("[Night Bonus Spawn] Night has begun. Checking bonuses...");
         const numPlayers = Object.keys(players).length;
         const bonusesToSpawn = Math.max(0, numPlayers - bonuses.length);
-        console.log(`Players: ${numPlayers}, Current Bonuses: ${bonuses.length}, Need to spawn: ${bonusesToSpawn}`);
+        // console.log(`Players: ${numPlayers}, Current Bonuses: ${bonuses.length}, Need to spawn: ${bonusesToSpawn}`);
 
         if (bonusesToSpawn > 0) {
             const boundaryVertices = mapGenerator.getBoundaryVertices();
@@ -753,6 +864,21 @@ setInterval(() => {
                         continue; // Слишком близко к стене, следующая попытка
                     }
 
+                    // 3. Проверка расстояния до других бонусов
+                    let tooCloseToOtherBonus = false;
+                    for (const existingBonus of bonuses) {
+                        const dxBonus = spawnX - existingBonus.x;
+                        const dyBonus = spawnY - existingBonus.y;
+                        const distSqBonus = dxBonus * dxBonus + dyBonus * dyBonus;
+                        if (distSqBonus < MIN_BONUS_DISTANCE_SQ) {
+                            tooCloseToOtherBonus = true;
+                            break;
+                        }
+                    }
+                    if (tooCloseToOtherBonus) {
+                        continue; // Слишком близко к другому бонусу
+                    }
+
                     isValidSpawn = true; // Точка подходит
 
                 } while (!isValidSpawn && spawnAttempts < maxSpawnPointAttempts && attemptsTotal < maxSpawnTotalAttempts);
@@ -765,12 +891,12 @@ setInterval(() => {
                     };
                     bonuses.push(newBonus);
                     spawnedCount++;
-                    console.log(`[Night Bonus Spawn] Spawned bonus ${newBonus.id} at (${spawnX.toFixed(0)}, ${spawnY.toFixed(0)})`);
+                    // console.log(`[Night Bonus Spawn] Spawned bonus ${newBonus.id} at (${spawnX.toFixed(0)}, ${spawnY.toFixed(0)})`);
                 } else {
-                    console.warn(`[Night Bonus Spawn] Failed to find valid spawn point for a bonus after ${spawnAttempts} attempts.`);
+                    // console.warn(`[Night Bonus Spawn] Failed to find valid spawn point for a bonus after ${spawnAttempts} attempts.`);
                     // Прерываем спавн, если не можем найти точку, чтобы не зациклиться
                     if (attemptsTotal >= maxSpawnTotalAttempts) {
-                         console.error(`[Night Bonus Spawn] Reached max total attempts (${maxSpawnTotalAttempts}). Stopping bonus spawn for this cycle.`);
+                         // console.error(`[Night Bonus Spawn] Reached max total attempts (${maxSpawnTotalAttempts}). Stopping bonus spawn for this cycle.`);
                          break; 
                     }
                 }
@@ -781,8 +907,12 @@ setInterval(() => {
 
     // --- Конец логики спавна бонусов ---
 
+    // 5. Формируем gameState ПОСЛЕ всех обновлений и удалений
+    // console.log("[Server] Preparing gameState. Current player IDs:", Object.keys(players)); // DEBUG LOG <-- REMOVING THIS
     const gameState = {
         players: Object.values(players).map(p => {
+            // Добавим проверку на существование p, на всякий случай
+            if (!p) return null; // Пропустить, если игрок как-то стал null/undefined
             const input = p.input || {}; // Защита от undefined input
             const isSprinting = !!input.isShiftDown; // Теперь зависит только от Shift
             const isAiming = !!input.isAiming;
@@ -802,9 +932,15 @@ setInterval(() => {
                 isAiming: isAiming, // Отправляем статус прицеливания
                 name: p.name // Добавляем имя
             };
-        }),
+        }).filter(p => p !== null), // Убираем null значения, если вдруг появились
         bullets: Object.values(bullets).map(b => ({ id: b.id, x: b.x, y: b.y })),
-        bonuses: bonuses.map(b => ({ id: b.id, x: b.x, y: b.y })), // <-- Отправляем бонусы
+        bonuses: bonuses.map(b => ({ 
+            id: b.id, 
+            x: b.x, 
+            y: b.y, 
+            type: b.type, // Отправляем тип (может быть undefined)
+            amount: b.amount // Отправляем количество (если есть)
+        })), 
         // --- Добавляем время цикла --- 
         cycleTime: currentCycleTime,
         cycleDuration: DAY_NIGHT_CYCLE_DURATION,
@@ -816,5 +952,5 @@ setInterval(() => {
 // Start server
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`Server running on port ${PORT}`); // <-- KEEP this log
 }); 
