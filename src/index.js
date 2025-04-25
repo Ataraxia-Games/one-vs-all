@@ -224,9 +224,10 @@ const playerRadius = 15;
 const hunterBaseHealth = 100; // Базовое здоровье Охотника
 const BASE_PREDATOR_HEALTH = 100; // Базовое здоровье Хищника
 const HEALTH_PER_HUNTER = 50;   // Доп. здоровье за каждого Охотника
-const shootCooldown = 500; 
-const bulletSpeed = 900; // Новая скорость (600 * 1.5)
-const bulletLifetime = 1000; 
+const shootCooldown = 500;
+const bulletSpeed = 900; // Базовая скорость пуль (теперь используется для ботов)
+const hunterBulletSpeed = bulletSpeed * 2; // Ускоренная скорость для игроков-людей
+const bulletLifetime = 1000;
 const shotgunPellets = 7; 
 const shotgunSpread = Math.PI / 12; // Разброс дроби
 const bulletRadius = 2; // Добавим радиус пули для столкновений
@@ -432,13 +433,16 @@ io.on('connection', (socket) => {
             const startX = player.x + Math.cos(player.angle) * (playerRadius + 5);
             const startY = player.y + Math.sin(player.angle) * (playerRadius + 5);
 
+            // Определяем скорость пули в зависимости от типа игрока
+            const currentBulletSpeed = player.isBot ? bulletSpeed : hunterBulletSpeed;
+
             const newBullet = {
                 id: nextBulletId++,
                 ownerId: socket.id, // Добавляем ID владельца
                 x: startX,
                 y: startY,
                 angle: spreadAngle,
-                speed: bulletSpeed,
+                speed: currentBulletSpeed, // Используем определенную скорость
                 radius: bulletRadius, // Используем радиус пули
                 damage: bulletDamage, // Используем урон пули
                 spawnTime: Date.now(),
